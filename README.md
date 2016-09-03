@@ -39,18 +39,18 @@ make
 
 ```
 rtl_sdr  -f $DOWNCONVERTED_FREQ  -s 2400000  capture.iq
-./leandvb  -f 2400e3  --sr 2000e3  --cr 1/2   < /tmp/capture.iq  > /tmp/capture.ts
+./leandvb  -f 2400e3  --sr 2000e3  --cr 1/2   < capture.iq  > capture.ts
 mplayer capture.ts
 ```
 
 ### Troubleshooting
 
 ```
-./leandvb_gui  --gui  -v  -d  -f 2400e3  --sr 2000e3  --cr 1/2  < /tmp/capture.iq  > /tmp/capture.ts
+./leandvb  --gui  -v  -d  -f 2400e3  --sr 2000e3  --cr 1/2  < capture.iq  > capture.ts
 ```
 
-#### Live receiver with auto-detection of symbol rate and code rate:
+### Live receiver with auto-detection of symbol rate and code rate:
 
 ```
-rtl_sdr  -f $DOWNCONVERTED_FREQ  -s 2400000  -  |  ./leansdrscan  -v  ./leandvb_gui --gui  -f 2400e3  --sr 2000e3,1000e3,500e3,250e3  --cr 1/2,2/3,3/4,5/6,7/8  -  |  mplayer  -cache 128  -
+rtl_sdr  -f $DOWNCONVERTED_FREQ  -s 2400000  -  |  ./leansdrscan  -v  ./leandvb --gui  -f 2400e3  --sr 2000e3,1000e3,500e3,250e3  --cr 1/2,2/3,3/4,5/6,7/8  -  |  mplayer  -cache 128  -
 ```
