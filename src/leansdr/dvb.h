@@ -309,6 +309,7 @@ namespace leansdr {
 					  pipebuf<softsymbol> &_in,
 					  pipebuf<u8> &_out,
 					  enum code_rate rate) {
+    // EN 300 421, section 4.4.3 Inner coding
     unsigned long pX, pY;
     switch ( rate ) {
     case FEC12:
@@ -316,8 +317,8 @@ namespace leansdr {
       pY = 0x1;  // 1
       break;
     case FEC23:
-      pX = 0x2;  // 10
-      pY = 0x3;  // 11
+      pX = 0xa;  // 1010  (Handle as FEC4/6, no half-symbols)
+      pY = 0xf;  // 1111
       break;
     case FEC34:
       pX = 0x5;  // 101
