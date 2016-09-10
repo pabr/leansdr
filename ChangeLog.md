@@ -1,3 +1,6 @@
+HEAD
+  * Support for DVB-S2 constellations (not FEC).
+
 2016-09-04 First release from git, commit f254bdb939e3de59d862386773f1e335eef5dd12
   * leandvb is now distributed as part of leansdr.
   * Support for all DVB-S code rates.

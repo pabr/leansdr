@@ -10,7 +10,45 @@ namespace leansdr {
 
   // Generic deconvolution
 
-  enum code_rate { FEC12, FEC23, FEC34, FEC56, FEC78 };
+  enum code_rate {
+    FEC12, FEC23, FEC34, FEC56, FEC78,  // DVB-S
+    FEC45, FEC89, FEC910,               // DVB-S2
+  };
+
+  // Customize APSK radii according to code rate
+#include <leansdr/sdr.h>
+  cstln_lut<256> *make_dvbs2_constellation(cstln_lut<256>::predef c,
+					   code_rate r) {
+    float gamma1=1, gamma2=1;
+    switch ( c ) {
+    case cstln_lut<256>::APSK16:
+      // EN 302 307, section 5.4.3, Table 9
+      switch ( r ) {
+      case FEC23:  gamma1 = 3.15; break;
+      case FEC34:  gamma1 = 2.85; break;
+      case FEC45:  gamma1 = 2.75; break;
+      case FEC56:  gamma1 = 2.70; break;
+      case FEC89:  gamma1 = 2.60; break;
+      case FEC910: gamma1 = 2.57; break;
+      default: fail("Code rate not supported with APSK16");
+      }
+      break;
+    case cstln_lut<256>::APSK32:
+      // EN 302 307, section 5.4.4, Table 10
+      switch ( r ) {
+      case FEC34:  gamma1 = 2.84; gamma2 = 5.27; break;
+      case FEC45:  gamma1 = 2.72; gamma2 = 4.87; break;
+      case FEC56:  gamma1 = 2.64; gamma2 = 4.64; break;
+      case FEC89:  gamma1 = 2.54; gamma2 = 4.33; break;
+      case FEC910: gamma1 = 2.53; gamma2 = 4.30; break;
+      default: fail("Code rate not supported with APSK32");
+      }
+      break;
+    default:
+      break;
+    }
+    return new cstln_lut<256>(c, gamma1, gamma2);
+  }
 
   static const int DVBS_G1 = 0171;
   static const int DVBS_G2 = 0133;
@@ -333,7 +371,10 @@ namespace leansdr {
       pY = 0x7a;  // 1111010
       break;
     default:
-      fail("Code rate not implemented");
+      //fail("Code rate not implemented");
+      // For testing DVB-S2 constellations.
+      fprintf(stderr, "Code rate not implemented; proceeding anyway\n");
+      pX = pY = 1;
     }
     return deconvol_sync_simple(sch, _in, _out, DVBS_G1, DVBS_G2, pX, pY);
   }

@@ -31,6 +31,8 @@ struct config {
   float awgn;        // Standard deviation of noise
 
   float Fm;          // QPSK symbol rate (Hz) 
+  enum dvb_version { DVB_S, DVB_S2 } standard;
+  cstln_lut<256>::predef constellation;
   code_rate fec;
   float Ftune;       // Bias frequency for the QPSK demodulator (Hz)
 
@@ -50,6 +52,8 @@ struct config {
       fd_pp(-1),
       awgn(0),
       Fm(2e6),
+      standard(DVB_S),
+      constellation(cstln_lut<256>::QPSK),
       fec(FEC12),
       Ftune(0),
       gui(false),
@@ -230,6 +234,12 @@ int run(config &cfg) {
 			    &p_freq, &p_ss, &p_mer, &p_sampled);
   cstln_lut<256> qpsk(cstln_lut<256>::QPSK);
   demod.cstln = &qpsk;
+  if ( cfg.standard == config::DVB_S2 ) {
+    // For DVB-S2 testing only.
+    // Constellation should be determined from PL signalling.
+    fprintf(stderr, "DVB-S2: Testing symbol sampler only.\n");
+    demod.cstln = make_dvbs2_constellation(cfg.constellation, cfg.fec);
+  }
   demod.set_omega(cfg.Fs/cfg.Fm);
   if ( cfg.Ftune ) {
     if ( cfg.verbose )
@@ -243,6 +253,7 @@ int run(config &cfg) {
     cscope<f32> *r_scope_symbols =
       new cscope<f32>(&sch, p_sampled, -amp,amp);
     r_scope_symbols->decimation = 1;
+    r_scope_symbols->cstln = &demod.cstln;
   }
 #endif
 
@@ -373,14 +384,16 @@ void usage(const char *name, FILE *f, int c) {
 	  "\nDVB-S options:\n"
 	  "  --sr HZ        Symbol rate (default: 2e6)\n"
 	  "  --tune HZ      Bias frequency for demodulation\n"
-	  "  --cr N/D       Code rate 1/2 .. 7/8 (default: 1/2)\n"
+	  "  --standard S   DVB-S (default), DVB-S2 (not implemented)\n"
+	  "  --const C      QPSK (default), 8PSK .. 32APSK (DVB-S2 only)\n"
+	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
 	  );
   fprintf(f,
 	  "\nUI options:\n"
-	  "  -h             Print this message\n"
-	  "  -v             Output info during startup\n"
-	  "  -d             Output debugging info\n"
-	  "  --fd-info NUM  Print demodulator status to file descriptor\n"
+	  "  -h             Display this help message and exit\n"
+	  "  -v             Output debugging info at startup and exit\n"
+	  "  -d             Output debugging info during operation\n"
+	  "  --fd-info NUM  Output demodulator status to file descriptor\n"
 	  );
 #ifdef GUI
   fprintf(f,
@@ -409,13 +422,40 @@ int main(int argc, const char *argv[]) {
       cfg.Fs = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--sr") && i+1<argc )
       cfg.Fm = atof(argv[++i]);
+    else if ( ! strcmp(argv[i], "--standard") && i+1<argc ) {
+      ++i;
+      if      ( ! strcmp(argv[i], "DVB-S" ) )
+	cfg.standard = config::DVB_S;
+      else if ( ! strcmp(argv[i], "DVB-S2" ) )
+	cfg.standard = config::DVB_S2;
+      else usage(argv[0], stderr, 1);
+    }
+    else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
+      ++i;
+      if      ( ! strcmp(argv[i], "BPSK" ) )
+	cfg.constellation = cstln_lut<256>::BPSK;
+      else if ( ! strcmp(argv[i], "QPSK" ) )
+	cfg.constellation = cstln_lut<256>::QPSK;
+      else if ( ! strcmp(argv[i], "8PSK" ) )
+	cfg.constellation = cstln_lut<256>::PSK8;
+      else if ( ! strcmp(argv[i], "16APSK" ) )
+	cfg.constellation = cstln_lut<256>::APSK16;
+      else if ( ! strcmp(argv[i], "32APSK" ) )
+	cfg.constellation = cstln_lut<256>::APSK32;
+      else usage(argv[0], stderr, 1);
+    }
     else if ( ! strcmp(argv[i], "--cr") && i+1<argc ) {
       ++i;
+      // DVB-S
       if      ( ! strcmp(argv[i], "1/2" ) ) cfg.fec = FEC12;
       else if ( ! strcmp(argv[i], "2/3" ) ) cfg.fec = FEC23;
       else if ( ! strcmp(argv[i], "3/4" ) ) cfg.fec = FEC34;
       else if ( ! strcmp(argv[i], "5/6" ) ) cfg.fec = FEC56;
       else if ( ! strcmp(argv[i], "7/8" ) ) cfg.fec = FEC78;
+      // DVB-S2
+      else if ( ! strcmp(argv[i], "4/5"  ) ) cfg.fec = FEC45;
+      else if ( ! strcmp(argv[i], "8/9"  ) ) cfg.fec = FEC89;
+      else if ( ! strcmp(argv[i], "9/10" ) ) cfg.fec = FEC910;
       else usage(argv[0], stderr, 1);
     }
     else if ( ! strcmp(argv[i], "--anf") && i+1<argc )

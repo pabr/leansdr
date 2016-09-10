@@ -139,11 +139,13 @@ namespace leansdr {
     T xymin, xymax;
     unsigned long decimation;
     unsigned long pixels_per_frame;
+    cstln_lut<256> **cstln;  // Optional ptr to optional constellation
     cscope(scheduler *sch, pipebuf< complex<T> > &_in, T _xymin, T _xymax,
 	   const char *_name=NULL)
       : runnable(sch, _name?_name:_in.name),
 	xymin(_xymin), xymax(_xymax),
 	decimation(DEFAULT_GUI_DECIMATION), pixels_per_frame(1024),
+	cstln(NULL),
 	in(_in), phase(0), g(sch, name) {
     }
     void run() {
@@ -155,6 +157,19 @@ namespace leansdr {
 	  for ( ; p<pend; ++p )
 	    g.point(g.w*(p->re-xymin)/(xymax-xymin),
 		    g.h - g.h*(p->im-xymin)/(xymax-xymin));
+	  if ( cstln && (*cstln) ) {
+	    // Plot constellation points
+	    g.setfg(255, 255, 255);
+	    for ( int i=0; i<(*cstln)->nsymbols; ++i ) {
+	      complex<signed char> *p = &(*cstln)->symbols[i];
+	      int x = g.w*(p->re-xymin)/(xymax-xymin);
+	      int y = g.h - g.h*(p->im-xymin)/(xymax-xymin);
+	      for ( int d=-2; d<=2; ++d ) {
+		g.point(x+d, y);
+		g.point(x, y+d);
+	      }
+	    }
+	  }
 	  g.show();
 	  g.sync();
 	}

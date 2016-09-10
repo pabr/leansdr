@@ -166,25 +166,114 @@ namespace leansdr {
     unsigned char metric;
   };
 
-  const float cstln_amp = 64;
+  const float cstln_amp = 64;  // RMS
 
   template<int R>
   struct cstln_lut {
     complex<signed char> *symbols;
-    enum predef { QPSK };
-    cstln_lut(predef type) {
-      signed char a;
+    int nsymbols;
+    enum predef { BPSK, QPSK, PSK8, APSK16, APSK32 };
+    cstln_lut(predef type, float gamma1=1, float gamma2=1) {
       switch ( type ) {
-      case QPSK:
-	a = cstln_amp * sqrtf(2)/2;
-	symbols = new complex<signed char>[4];
-	symbols[0].re =  a;  symbols[0].im =  a;
-	symbols[1].re =  a;  symbols[1].im = -a;
-	symbols[2].re = -a;  symbols[2].im =  a;
-	symbols[3].re = -a;  symbols[3].im = -a;
-	make_lut_from_symbols(4);
+      case BPSK:
+	nsymbols = 2;
+	symbols = new complex<signed char>[nsymbols];
+	symbols[0] = polar(1, 2, 0);
+	symbols[1] = polar(1, 2, 1);
+	make_lut_from_symbols();
 	break;
-	// TBD: BPSK, 8PSK, 16QAM, 16APSK, 32APSK
+      case QPSK:
+	// EN 300 421, section 4.5 Baseband shaping and modulation
+	// EN 302 307, section 5.4.1
+	nsymbols = 4;
+	symbols = new complex<signed char>[nsymbols];
+	symbols[0] = polar(1, 4, 0.5);
+	symbols[1] = polar(1, 4, 3.5);
+	symbols[2] = polar(1, 4, 1.5);
+	symbols[3] = polar(1, 4, 2.5);
+	make_lut_from_symbols();
+	break;
+      case PSK8:
+	// EN 302 307, section 5.4.2
+	nsymbols = 8;
+	symbols = new complex<signed char>[nsymbols];
+	symbols[0] = polar(1, 8, 0);
+	symbols[1] = polar(1, 8, 7);
+	symbols[2] = polar(1, 8, 4);
+	symbols[3] = polar(1, 8, 5);
+	symbols[4] = polar(1, 8, 2);
+	symbols[5] = polar(1, 8, 7);
+	symbols[6] = polar(1, 8, 3);
+	symbols[7] = polar(1, 8, 6);
+	make_lut_from_symbols();
+	break;
+      case APSK16: {
+	// EN 302 307, section 5.4.3
+	float r1 = sqrtf(4 / (1+3*gamma1*gamma1));
+	float r2 = gamma1 * r1;
+	nsymbols = 16;
+	symbols = new complex<signed char>[nsymbols];
+	symbols[0]  = polar(r2, 12,  1.5);
+	symbols[1]  = polar(r2, 12, 10.5);
+	symbols[2]  = polar(r2, 12,  4.5);
+	symbols[3]  = polar(r2, 12,  7.5);
+	symbols[4]  = polar(r2, 12,  0.5);
+	symbols[5]  = polar(r2, 12, 11.5);
+	symbols[6]  = polar(r2, 12,  5.5);
+	symbols[7]  = polar(r2, 12,  6.5);
+	symbols[8]  = polar(r2, 12,  2.5);
+	symbols[9]  = polar(r2, 12,  9.5);
+	symbols[10] = polar(r2, 12,  3.5);
+	symbols[11] = polar(r2, 12,  8.5);
+	symbols[12] = polar(r1, 4,   0.5);
+	symbols[13] = polar(r1, 4,   3.5);
+	symbols[14] = polar(r1, 4,   1.5);
+	symbols[15] = polar(r1, 4,   2.5);
+	make_lut_from_symbols();
+	break;
+      }
+      case APSK32: {
+	// EN 302 307, section 5.4.3
+	float r1 = sqrtf(8 / (1+3*gamma1*gamma1+4*gamma2*gamma2));
+	float r2 = gamma1 * r1;
+	float r3 = gamma2 * r1;
+	nsymbols = 32;
+	symbols = new complex<signed char>[nsymbols];
+	symbols[0]  = polar(r2, 12,  1.5);
+	symbols[1]  = polar(r2, 12,  2.5);
+	symbols[2]  = polar(r2, 12, 10.5);
+	symbols[3]  = polar(r2, 12,  9.5);
+	symbols[4]  = polar(r2, 12,  4.5);
+	symbols[5]  = polar(r2, 12,  3.5);
+	symbols[6]  = polar(r2, 12,  7.5);
+	symbols[7]  = polar(r2, 12,  8.5);
+	symbols[8]  = polar(r3, 16,  1  );
+	symbols[9]  = polar(r3, 16,  3  );
+	symbols[10] = polar(r3, 16, 14  );
+	symbols[11] = polar(r3, 16, 12  );
+	symbols[12] = polar(r3, 16,  6  );
+	symbols[13] = polar(r3, 16,  4  );
+	symbols[14] = polar(r3, 16,  9  );
+	symbols[15] = polar(r3, 16, 11  );
+	symbols[16] = polar(r2, 12,  0.5);
+	symbols[17] = polar(r1,  4,  0.5);
+	symbols[18] = polar(r2, 12, 11.5);
+	symbols[19] = polar(r1,  4,  3.5);
+	symbols[20] = polar(r2, 12,  5.5);
+	symbols[21] = polar(r1,  4,  1.5);
+	symbols[22] = polar(r2, 12,  6.5);
+	symbols[23] = polar(r1,  4,  2.5);
+	symbols[24] = polar(r3, 16,  0  );
+	symbols[25] = polar(r3, 16,  2  );
+	symbols[26] = polar(r3, 16, 15  );
+	symbols[27] = polar(r3, 16, 13  );
+	symbols[28] = polar(r3, 16,  7  );
+	symbols[29] = polar(r3, 16,  5  );
+	symbols[30] = polar(r3, 16,  8  );
+	symbols[31] = polar(r3, 16, 10  );
+	make_lut_from_symbols();
+	break;
+      }
       default:
 	fail("Constellation not implemented");
       }
@@ -197,13 +286,17 @@ namespace leansdr {
       return &lut[(unsigned char)I][(unsigned char)Q];
     }
   private:
+    complex<signed char> polar(float r, int n, float i) {
+      float a = i * 2*M_PI / n;
+      return complex<signed char>(r*cosf(a)*cstln_amp, r*sinf(a)*cstln_amp);
+    }
     result lut[R][R];
-    void make_lut_from_symbols(int M) {
+    void make_lut_from_symbols() {
       for ( int I=-R/2; I<R/2; ++I )
 	for ( int Q=-R/2; Q<R/2; ++Q ) {
 	  unsigned int dmin = R*2;
 	  unsigned char smin = 0;
-	  for ( int s=0; s<M; ++s ) {
+	  for ( int s=0; s<nsymbols; ++s ) {
 	    unsigned int d = hypotf(I-symbols[s].re, Q-symbols[s].im);
 	    if ( d < dmin ) { dmin=d; smin=s; }
 	  }
@@ -288,6 +381,7 @@ namespace leansdr {
 	softsymbol *pout=out.wr(), *pout0=pout;
 	
 	// These are scoped outside the loop for SS and MER estimation.
+	complex<float> sg; // Symbol before AGC;
 	complex<float> s;  // For MER estimation and constellation viewer
 	complex<signed char> *cstln_point = NULL;
 	
@@ -309,9 +403,8 @@ namespace leansdr {
 			      pin[1].re*sinph + pin[1].im*cosph);
 	    
 	    // Interpolate linearly
-	    float cmu = 1 - mu;
-	    s.re = (s0.re*cmu + s1.re*mu) * agc_gain;
-	    s.im = (s0.im*cmu + s1.im*mu) * agc_gain;
+	    sg = s0*(1-mu) + s1*mu;
+	    s = sg * agc_gain;
 	    
 	    // Constellation look-up
 	    cstln_lut<256>::result *cr = cstln->lookup(s.re, s.im);
@@ -372,7 +465,8 @@ namespace leansdr {
 	}
 	
 	// AGC
-	float insp = pin0->re*pin0->re + pin0->im*pin0->im;
+	// For APSK we must do AGC on the symbols, not the whole signal.
+	float insp = sg.re*sg.re + sg.im*sg.im;
 	est_insp = insp*kest + est_insp*(1-kest);
 	if ( est_insp )
 	  agc_gain = cstln_amp / gen_sqrt(est_insp);
