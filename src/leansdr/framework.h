@@ -170,7 +170,10 @@ namespace leansdr {
     }
     T *wr() { return buf.wr; }
     void written(unsigned long n) {
-      if ( buf.wr+n > buf.end ) fail("Bug: overflow");
+      if ( buf.wr+n > buf.end ) {
+	fprintf(stderr, "Bug: overflow to %s\n", buf.name);
+	exit(1);
+      }
       buf.wr += n;
       buf.total_written += n;
     }
@@ -184,7 +187,10 @@ namespace leansdr {
     unsigned long readable() { return buf.wr - buf.rds[id]; }
     T *rd() { return buf.rds[id]; }
     void read(unsigned long n) {
-      if ( buf.rds[id]+n > buf.wr ) fail("Bug: underflow");
+      if ( buf.rds[id]+n > buf.wr ) {
+	fprintf(stderr, "Bug: underflow from %s\n", buf.name);
+	exit(1);
+      }
       buf.rds[id] += n;
       buf.total_read += n;
     }
