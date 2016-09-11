@@ -315,6 +315,7 @@ namespace leansdr {
       skip = 0;
 
       // 8 byte margin to fill the deconvolver
+      if ( in.readable() < 64 ) return;
       int maxrd = (in.readable()-64) / (punctweight/2) * punctperiod / 8;
       int maxwr = out.writable();
       int n = (maxrd<maxwr) ? maxrd : maxwr;
