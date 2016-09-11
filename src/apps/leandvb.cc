@@ -73,15 +73,15 @@ int run(config &cfg) {
   sch.verbose = cfg.verbose;
   sch.debug = cfg.debug;
 
-  int x0 = 100, y0 = 100;
+  int x0 = 100, y0 = 10;
   
   window_placement window_hints[] = {
     { "rawiq (iq)", x0, y0, wh_const,wh_const },
     { "rawiq (spectrum)", x0+300, y0, w_fft, h_fft },
-    { "preprocessed (iq)", x0, y0+300, wh_const, wh_const },
-    { "preprocessed (spectrum)", x0+300, y0+300, w_fft, h_fft },
-    { "PSK symbols", x0, y0+600, wh_const, wh_const },
-    { "timeline", x0+300, y0+600, w_timeline, h_timeline },
+    { "preprocessed (iq)", x0, y0+280, wh_const, wh_const },
+    { "preprocessed (spectrum)", x0+300, y0+280, w_fft, h_fft },
+    { "PSK symbols", x0, y0+560, wh_const, wh_const },
+    { "timeline", x0+300, y0+560, w_timeline, h_timeline },
     { NULL, }
   };
   sch.windows = window_hints;
@@ -320,7 +320,7 @@ int run(config &cfg) {
   float max_packets_per_pixel = max_packet_rate / pixel_rate;
 
   slowmultiscope<f32>::chanspec chans[] = {
-    { &p_freq, "estimated frequency", "%3.0f kHz", {0,255,255},
+    { &p_freq, "estimated frequency", "%3.1f kHz", {0,255,255},
       cfg.Fs*1e-3f,
       (cfg.Ftune-cfg.Fs/4)*1e-3f, (cfg.Ftune+cfg.Fs/4)*1e-3f,
       slowmultiscope<f32>::chanspec::DEFAULT },
