@@ -370,7 +370,7 @@ namespace leansdr {
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
       
       int max_meas = chunk_size/meas_decimation + 1;
-      while ( in.readable() >= chunk_size &&
+      while ( in.readable() >= chunk_size+1 &&
 	      out.writable() >= chunk_size/min_omega+1 &&
 	      ( !freq_out  || freq_out ->writable()>=max_meas ) &&
 	      ( !ss_out    || ss_out   ->writable()>=max_meas ) &&
@@ -474,7 +474,7 @@ namespace leansdr {
 	// SS and MER
 	float sig_power = s.re*s.re+s.im*s.im;
 	est_sp = sig_power*kest + est_sp*(1-kest);
-	if ( ! cstln_point ) fatal("No sample");
+	if ( ! cstln_point ) fail("No sample");
 	complex<float> errvect(s.re-cstln_point->re, s.im-cstln_point->im);
 	float errvect_power = errvect.re*errvect.re + errvect.im*errvect.im;
 	est_ep = errvect_power*kest + est_ep*(1-kest);
@@ -546,8 +546,12 @@ namespace leansdr {
       : runnable(sch, "rotator"),
 	in(_in), out(_out), index(0) {
       int ifreq = freq * 65536;
-      for ( int i=0; i<65536; ++i )
+      if ( sch->debug )
+	fprintf(stderr, "Rotate: req=%f real=%f\n", freq, ifreq/65536.0);
+      for ( int i=0; i<65536; ++i ) {
 	lut_cos[i] = cosf(2*M_PI * i * ifreq / 65536);
+	lut_sin[i] = sinf(2*M_PI * i * ifreq / 65536);
+      }
     }
     void run() {
       unsigned long count = min(in.readable(), out.writable());
@@ -555,7 +559,7 @@ namespace leansdr {
       complex<T> *pout = out.wr();
       for ( ; pin<pend; ++pin,++pout,++index ) {
 	float c = lut_cos[index];
-	float s = lut_cos[index-16384U];
+	float s = lut_sin[index];
 	pout->re = pin->re*c - pin->im*s;
 	pout->im = pin->re*s + pin->im*c;
       }
@@ -566,6 +570,7 @@ namespace leansdr {
     pipereader< complex<T> > in;
     pipewriter< complex<T> > out;
     float lut_cos[65536];
+    float lut_sin[65536];
     unsigned short index;  // Current phase
   };
   
