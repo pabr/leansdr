@@ -73,15 +73,15 @@ int run(config &cfg) {
   sch.verbose = cfg.verbose;
   sch.debug = cfg.debug;
 
-  int x0 = 100, y0 = 10;
+  int x0 = 100, y0 = 40;
   
   window_placement window_hints[] = {
     { "rawiq (iq)", x0, y0, wh_const,wh_const },
     { "rawiq (spectrum)", x0+300, y0, w_fft, h_fft },
-    { "preprocessed (iq)", x0, y0+280, wh_const, wh_const },
-    { "preprocessed (spectrum)", x0+300, y0+280, w_fft, h_fft },
-    { "PSK symbols", x0, y0+560, wh_const, wh_const },
-    { "timeline", x0+300, y0+560, w_timeline, h_timeline },
+    { "preprocessed (iq)", x0, y0+300, wh_const, wh_const },
+    { "preprocessed (spectrum)", x0+300, y0+300, w_fft, h_fft },
+    { "PSK symbols", x0, y0+600, wh_const, wh_const },
+    { "timeline", x0+300, y0+600, w_timeline, h_timeline },
     { NULL, }
   };
   sch.windows = window_hints;
@@ -91,13 +91,23 @@ int run(config &cfg) {
   //   scopes: 1024
   //   ss_estimator: 1024
   //   anf: 4096
-  //   qpsk_sampler: omega+2 (negligible)
+  //   cstln_receiver: reads in chunks of 128+1
   unsigned long BUF_BASEBAND = 4096 * BUF_OVERSIZE;
-  // Need (1+204*(scan_syncs-1)+1)*8 = 4912 bits for deconvol+sync
-  unsigned long BUF_SYNC = 4912 * BUF_OVERSIZE;
-  // Need 17*11*12+204 = 2448 bytes for deinterleaver
-  unsigned long BUF_DEINTERLEAVE = 2448 * BUF_OVERSIZE;
+  // Min buffer size for IQ symbols
+  //   cstln_receiver: writes in chunks of 128/omega symbol
+  //   deconv_sync: reads at least 64
+  unsigned long BUF_SYMBOLS = 256 * BUF_OVERSIZE;
+  // Min buffer size for unsynchronized bytes
+  //   deconv_sync: writes byte by byte
+  //   mpeg_sync: reads up to 204*scan_syncs = 1632 bytes
+  unsigned long BUF_BYTES = 2048 * BUF_OVERSIZE;
+  // Min buffer size for synchronized (but interleaved) bytes
+  //   mpeg_sync: writes 1 rspacket
+  //   deinterleaver: reads 17*11*12+204 = 2448 bytes
+  unsigned long BUF_MPEGBYTES = 2448 * BUF_OVERSIZE;
+  // Min buffer size for packets: 1
   unsigned long BUF_PACKETS = BUF_OVERSIZE;
+  // Min buffer size for misc measurements: 1
   unsigned long BUF_SLOW = BUF_OVERSIZE;
 
   // INPUT
@@ -224,7 +234,7 @@ int run(config &cfg) {
 
   // QPSK
 
-  pipebuf<softsymbol> p_symbols(&sch, "PSK soft-symbols", BUF_SYNC);
+  pipebuf<softsymbol> p_symbols(&sch, "PSK soft-symbols", BUF_SYMBOLS);
   pipebuf<f32> p_freq(&sch, "freq", BUF_SLOW);
   pipebuf<f32> p_ss(&sch, "SS", BUF_SLOW);
   pipebuf<f32> p_mer(&sch, "MER", BUF_SLOW);
@@ -265,13 +275,13 @@ int run(config &cfg) {
   //  deconvol r_deconv(&sch, p_symbols, p_bits, 0171, 0133, FEC78);
   //  deconvol_sync r_deconv(&sch, p_symbols, p_bits, FEC12);
 
-  pipebuf<u8> p_bytes(&sch, "bytes", BUF_DEINTERLEAVE);
+  pipebuf<u8> p_bytes(&sch, "bytes", BUF_BYTES);
   pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
 
   deconvol_sync_simple r_deconv =
     make_deconvol_sync_simple(&sch, p_symbols, p_bytes, cfg.fec);
 
-  pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_DEINTERLEAVE);
+  pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
   mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, &r_deconv, &p_lock);
 
   // DEINTERLEAVING
