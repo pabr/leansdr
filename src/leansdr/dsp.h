@@ -187,9 +187,9 @@ namespace leansdr {
     }
     
   private:
-    int w;
     pipereader<T> in;
     pipewriter<T> out;
+    int w;
   };
 
 }  // namespace

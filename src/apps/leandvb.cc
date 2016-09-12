@@ -35,6 +35,7 @@ struct config {
   cstln_lut<256>::predef constellation;
   code_rate fec;
   float Ftune;       // Bias frequency for the QPSK demodulator (Hz)
+  bool filter;
 
   bool gui;          // Plot stuff
   float duration;    // Horizontal span of timeline GUI (s)
@@ -56,6 +57,7 @@ struct config {
       constellation(cstln_lut<256>::QPSK),
       fec(FEC12),
       Ftune(0),
+      filter(false),
       gui(false),
       duration(60),
       linger(false),
@@ -197,20 +199,20 @@ int run(config &cfg) {
     p_preprocessed = p_derot;
   }
 
-#if 0
-  // LOW-PASS FILTERING
+  if ( cfg.filter ) {
+    // LOW-PASS FILTERING
 
-  int decim = cfg.Fs / cfg.Fm / 2;
-  if ( decim > 1 ) {
-    if ( cfg.verbose )
-      fprintf(stderr, "Inserting filter %d\n", decim);
-    pipebuf<cf32> *p_lowpass =
-      new pipebuf<cf32>(&sch, "lowpass", BUF_BASEBAND);
-    naive_lowpass<cf32> *r_lowpass =
-      new naive_lowpass<cf32>(&sch, *p_preprocessed, *p_lowpass, decim);
-    p_preprocessed = p_lowpass;
+    int decim = cfg.Fs / cfg.Fm / 2;
+    if ( decim > 1 ) {
+      if ( cfg.verbose )
+	fprintf(stderr, "Inserting filter %d\n", decim);
+      pipebuf<cf32> *p_lowpass =
+	new pipebuf<cf32>(&sch, "lowpass", BUF_BASEBAND);
+      naive_lowpass<cf32> *r_lowpass =
+	new naive_lowpass<cf32>(&sch, *p_preprocessed, *p_lowpass, decim);
+      p_preprocessed = p_lowpass;
+    }
   }
-#endif
 
 #ifdef GUI
   if ( cfg.gui ) {
@@ -397,6 +399,8 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --standard S   DVB-S (default), DVB-S2 (not implemented)\n"
 	  "  --const C      QPSK (default), 8PSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
+	  "  --filter       Filter baseband (CPU-intensive)\n"
+	  "  --hq           Enable all CPU-intensive features\n"
 	  );
   fprintf(f,
 	  "\nUI options:\n"
@@ -467,6 +471,11 @@ int main(int argc, const char *argv[]) {
       else if ( ! strcmp(argv[i], "8/9"  ) ) cfg.fec = FEC89;
       else if ( ! strcmp(argv[i], "9/10" ) ) cfg.fec = FEC910;
       else usage(argv[0], stderr, 1);
+    }
+    else if ( ! strcmp(argv[i], "--filter") )
+      cfg.filter = true;
+    else if ( ! strcmp(argv[i], "--hq") ) {
+      cfg.filter = true;
     }
     else if ( ! strcmp(argv[i], "--anf") && i+1<argc )
       cfg.anf = atoi(argv[++i]);
