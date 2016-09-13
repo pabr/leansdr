@@ -370,8 +370,10 @@ namespace leansdr {
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
       
       int max_meas = chunk_size/meas_decimation + 1;
+      // Largin margin on output_size because mu adjustments
+      // can lead to more than chunk_size/min_omega symbols.
       while ( in.readable() >= chunk_size+1 &&
-	      out.writable() >= chunk_size/min_omega+1 &&
+	      out.writable() >= chunk_size &&
 	      ( !freq_out  || freq_out ->writable()>=max_meas ) &&
 	      ( !ss_out    || ss_out   ->writable()>=max_meas ) &&
 	      ( !mer_out   || mer_out  ->writable()>=max_meas ) &&

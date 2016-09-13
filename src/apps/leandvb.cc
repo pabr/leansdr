@@ -98,8 +98,8 @@ int run(config &cfg) {
   //   cstln_receiver: reads in chunks of 128+1
   unsigned long BUF_BASEBAND = 4096 * BUF_OVERSIZE;
   // Min buffer size for IQ symbols
-  //   cstln_receiver: writes in chunks of 128/omega symbol
-  //   deconv_sync: reads at least 64
+  //   cstln_receiver: writes in chunks of 128/omega symbols (margin 128)
+  //   deconv_sync: reads at least 64+32
   unsigned long BUF_SYMBOLS = 256 * BUF_OVERSIZE;
   // Min buffer size for unsynchronized bytes
   //   deconv_sync: writes byte by byte
