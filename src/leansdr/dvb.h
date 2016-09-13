@@ -96,6 +96,7 @@ namespace leansdr {
 		  unsigned long gX, unsigned long gY,
 		  unsigned long pX, unsigned long pY)
       : runnable(sch, "deconvol_sync"),
+	fastlock(false),
 	in(_in), out(_out,SIZE_RSPACKET),
 	skip(0) {
       conv = new unsigned long[2];
@@ -115,6 +116,7 @@ namespace leansdr {
       if ( sch->verbose ) 
 	fprintf(stderr, "puncturing %d/%d\n", punctperiod, punctweight);
       deconv = new iq_t[punctperiod];
+      deconv2 = new iq_t[punctperiod];
       inverse_convolution();
       init_syncs();
       locked = &syncs[0];
@@ -166,6 +168,7 @@ namespace leansdr {
     }
     
     void next_sync() {
+      if ( fastlock ) fatal("Bug: next_sync() called with fastlock");
       ++locked;
       if ( locked == &syncs[NSYNCS] ) {
 	locked = &syncs[0];
@@ -174,12 +177,15 @@ namespace leansdr {
       }
     }
 
+    bool fastlock;
+
   private:
 
     static const int maxsbits = 64;
     iq_t response[maxsbits];
 
-    static const int traceback = 48;  // For code rate 7/8
+    //static const int traceback = 48;  // For code rate 7/8
+    static const int traceback = 64;  // For code rate 7/8 with fastlock
 
     void solve_rec(iq_t prefix, int nprefix, signal_t exp, iq_t *best) {
       if ( prefix > *best ) return;
@@ -208,22 +214,67 @@ namespace leansdr {
 	deconv[b] = -(iq_t)1;
 	solve_rec(0, 0, 1<<b, &deconv[b]);
       }
+      
+      // Alternate polynomials for fastlock
+      for ( int b=0; b<punctperiod; ++b ) {
+	unsigned long long d=deconv[b], d2=d;
+	// 1/2
+	if ( d == 0x00000000000003baLL ) d2 = 0x0000000000038ccaLL;
+	// 2/3
+	if ( d == 0x0000000000000f29LL ) d2 = 0x000000003c569329LL;
+	if ( d == 0x000000000003c552LL ) d2 = 0x00000000001dee1cLL;
+	if ( d == 0x0000000000007948LL ) d2 = 0x00000001e2b49948LL;
+	if ( d == 0x00000000000001deLL ) d2 = 0x00000000001e2a90LL;
+	// 3/4
+	if ( d == 0x000000000000f247LL ) d2 = 0x000000000fd6383bLL;
+	if ( d == 0x00000000000fd9eeLL ) d2 = 0x000000000fd91392LL;
+	if ( d == 0x0000000000f248d8LL ) d2 = 0x00000000fd9eef18LL;
+	// 5/6
+	if ( d == 0x0000000000f5727fLL ) d2 = 0x000003d5c909758fLL;
+	if ( d == 0x000000003d5c90aaLL ) d2 = 0x0f5727f0229c90aaLL;
+	if ( d == 0x000000003daa371cLL ) d2 = 0x000003d5f45630ecLL;
+	if ( d == 0x0000000f5727ff48LL ) d2 = 0x0000f57d28260348LL;
+	if ( d == 0x0000000f57d28260LL ) d2 = 0xf5727ff48128260LL;
+	// 7/8
+	if ( d == 0x0000fbeac76c454fLL ) d2 = 0x00fb11d6ba045a8fLL;
+	if ( d == 0x00000000fb11d6baLL ) d2 = 0xfbea3c7d930e16baLL;
+	if ( d == 0x0000fb112d5038dcLL ) d2 = 0x00fb112d5038271cLL;
+	if ( d == 0x000000fbea3c7d68LL ) d2 = 0x00fbeac7975462a8LL;
+	if ( d == 0x00000000fb112d50LL ) d2 = 0x00fbea3c86793290LL;
+	if ( d == 0x0000fb112dabd2e0LL ) d2 = 0x00fb112d50c3cd20LL;
+	if ( d == 0x00000000fb11d640LL ) d2 = 0x00fbea3c8679c980LL;
+	if ( d2 == d ) fail("Alt polynomial not provided");
+	deconv2[b] = d2;
+      }
+
+      if ( sch->debug ) {
+	for ( int b=0; b<punctperiod; ++b )
+	  fprintf(stderr, "deconv[%d]=0x%016llx %d taps / %d bits\n",
+		  b, deconv[b], hamming(deconv[b]), log2(deconv[b])+1);
+      }
 
       // Sanity check
       for ( int b=0; b<punctperiod; ++b ) {
 	for ( int i=0; i<maxsbits; ++i ) {
 	  iq_t iq = convolve((iq_t)1<<i);
-	  unsigned long d = parity(iq&deconv[b]);
 	  unsigned long expect = (b==i) ? 1 : 0;
+	  unsigned long d = parity(iq&deconv[b]);
 	  if ( d != expect )
 	    fail("Failed to inverse convolutional coding");
+	  unsigned long d2 = parity(iq&deconv2[b]);
+	  if ( d2 != expect )
+	    fail("Failed to inverse convolutional coding (alt)");
 	}
+	if ( traceback > sizeof(iq_t)*8 )
+	  fail("Bug: traceback exceeds register size");
 	if ( log2(deconv[b])+1 > traceback )
-	  fail("traceback exceeds limit");
+	  fail("traceback insufficient for deconvolution");
+	if ( log2(deconv2[b])+1 > traceback )
+	  fail("traceback insufficient for deconvolution (alt)");
       }
     }
 
-    static const int NSYNCS = 8;
+    static const int NSYNCS = 4;
 
     struct sync_t {
       u8 lut[2][2];  // lut[(re>0)?1:0][(im>0)?1:0] = 0b000000IQ
@@ -231,11 +282,15 @@ namespace leansdr {
       int n_in;
       signal_t out;
       int n_out;
+      // Auxiliary shift register for fastlock
+      iq_t in2;
+      int n_in2, n_out2;
     } syncs[NSYNCS];
 
     void init_syncs() {
       // EN 300 421, section 4.5, Figure 5 QPSK constellation
       // Four rotations * two conjugations.
+      // 180° rotation is detected as polarity inversion in mpeg_sync.
       for ( int sync_id=0; sync_id<NSYNCS; ++sync_id ) {
 	for ( int re_pos=0; re_pos<=1; ++re_pos )
 	  for ( int im_pos=0; im_pos<=1; ++im_pos ) {
@@ -250,21 +305,22 @@ namespace leansdr {
 	      I = im_pos ? 0 : 1;
 	      Q = re_neg ? 0 : 1;
 	      break;
-	    case 2:  // Direct 180°
-	      I = re_neg ? 0 : 1;
-	      Q = im_neg ? 0 : 1;
-	      break;
-	    case 3:  // Direct 270°
-	      I = im_neg ? 0 : 1;
-	      Q = re_pos ? 0 : 1;
-	      break;
-	    case 4:  // Conj 0°
+	    case 2:  // Conj 0°
 	      I = re_pos ? 0 : 1;
 	      Q = im_pos ? 1 : 0;
 	      break;
-	    case 5:  // Conj 90°
+	    case 3:  // Conj 90°
 	      I = im_pos ? 1 : 0;
 	      Q = re_neg ? 0 : 1;
+	      break;
+#if 0
+	    case 4:  // Direct 180°
+	      I = re_neg ? 0 : 1;
+	      Q = im_neg ? 0 : 1;
+	      break;
+	    case 5:  // Direct 270°
+	      I = im_neg ? 0 : 1;
+	      Q = re_pos ? 0 : 1;
 	      break;
 	    case 6:  // Conj 180°
 	      I = re_neg ? 0 : 1;
@@ -274,11 +330,14 @@ namespace leansdr {
 	      I = im_neg ? 1 : 0;
 	      Q = re_pos ? 0 : 1;
 	      break;
+#endif
 	    }
 	    syncs[sync_id].lut[re_pos][im_pos] = (I<<1) | Q;
 	  }
 	syncs[sync_id].n_in = 0;
 	syncs[sync_id].n_out = 0;
+	syncs[sync_id].n_in2 = 0;
+	syncs[sync_id].n_out2 = 0;
       }
     }
 
@@ -291,13 +350,14 @@ namespace leansdr {
 
     inline Tbyte readbyte(sync_t *s, softsymbol *&p) {
       while ( s->n_out < 8 ) {
+	iq_t iq = s->in;
 	while ( s->n_in < traceback ) {
-	  u8 iq = s->lut[(p->symbol&2)?1:0][p->symbol&1];
+	  u8 iqbits = s->lut[(p->symbol&2)?1:0][p->symbol&1];
 	  ++p;
-	  s->in = (s->in<<2) | iq;
+	  iq = (iq<<2) | iqbits;
 	  s->n_in += 2;
 	}
-	iq_t iq = s->in >> (s->n_in-40);
+	s->in = iq;
 	for ( int b=punctperiod-1; b>=0; --b ) {
 	  u8 bit = parity(iq&deconv[b]);
 	  s->out = (s->out<<1) | bit;
@@ -310,6 +370,29 @@ namespace leansdr {
       return res;
     }
 
+    inline unsigned long readerrors(sync_t *s, softsymbol *&p) {
+      unsigned long res = 0;
+      while ( s->n_out2 < 8 ) {
+	iq_t iq = s->in2;
+	while ( s->n_in2 < traceback ) {
+	  u8 iqbits = s->lut[(p->symbol&2)?1:0][p->symbol&1];
+	  ++p;
+	  iq = (iq<<2) | iqbits;
+	  s->n_in2 += 2;
+	}
+	s->in2 = iq;
+	for ( int b=punctperiod-1; b>=0; --b ) {
+	  u8 bit  = parity(iq&deconv[b]);
+	  u8 bit2 = parity(iq&deconv2[b]);
+	  if ( bit2 != bit ) ++res;
+	}
+	s->n_out2 += punctperiod;
+	s->n_in2 -= punctweight;
+      }
+      s->n_out2 -= 8;
+      return res;
+    }
+
     void run_decoding() {
       in.read(skip);
       skip = 0;
@@ -319,8 +402,42 @@ namespace leansdr {
       int maxrd = (in.readable()-64) / (punctweight/2) * punctperiod / 8;
       int maxwr = out.writable();
       int n = (maxrd<maxwr) ? maxrd : maxwr;
-      if ( n <= 0 ) return;
+      if ( ! n ) return;
+      // Require enough symbols to discriminate in fastlock mode
+      // (threshold must be less than size of rspacket)
+      if ( n < 32 ) return;
       
+      if ( fastlock ) {
+	// Try all sync alignments
+	unsigned long errors_best = 1 << 30;
+	sync_t *best = &syncs[0];
+	for ( sync_t *s=syncs; s<syncs+NSYNCS; ++s ) {
+	  softsymbol *pin = in.rd();
+	  unsigned long errors = 0;
+	  for ( int c=n; c--; )
+	    errors += readerrors(s, pin);
+	  if ( errors < errors_best ) {
+	    errors_best = errors;
+	    best = s;
+	  }
+	}
+	if ( best != locked ) {
+	  // Another alignment produces fewer bit errors
+#if 0
+	  fprintf(stderr, "[sync %d->%d=%lu]\n",
+		  (int)(locked-syncs), (int)(best-syncs),
+		  errors_best*100/n/8);
+#endif
+	  // fprintf(stderr, "%%");
+	  locked = best;
+	}
+	// If deconvolution bit error rate > 33%, try next sample alignment
+	if ( errors_best > n*8/3 ) {
+	  // fprintf(stderr, ">");
+	  skip = 1;
+	}
+      }
+
       softsymbol *pin=in.rd(), *pin0=pin;
       Tbyte *pout=out.wr(), *pout0=pout;
       while ( n-- )
@@ -337,6 +454,7 @@ namespace leansdr {
     unsigned long *punct;  // [nG] Puncturing pattern
     int punctperiod, punctweight;
     iq_t *deconv;  // [punctperiod] Deconvolution polynomials
+    iq_t *deconv2;  // [punctperiod] Alternate polynomials (for fastlock)
     sync_t *locked;
     int skip;
 
@@ -384,6 +502,7 @@ namespace leansdr {
   struct mpeg_sync : runnable {
     int scan_syncs, want_syncs;
     unsigned long lock_timeout;
+    bool fastlock;
 
     mpeg_sync(scheduler *sch,
 	      pipebuf<Tbyte> &_in,
@@ -393,77 +512,125 @@ namespace leansdr {
       : runnable(sch, "sync_detect"),
 	scan_syncs(4), want_syncs(2),
 	lock_timeout(4),
+	fastlock(false),
 	in(_in), out(_out, SIZE_RSPACKET*(scan_syncs+1)),
 	deconv(_deconv),
+	polarity(0),
 	bitphase(0), synchronized(false),
+	next_sync_count(0),
 	report_state(true) {
       state_out = _state_out ? new pipewriter<int>(*_state_out) : NULL;
     }
     
     void run() {
       if ( report_state && state_out && state_out->writable()>=1 ) {
+	// Report unlocked state on first invocation.
 	*state_out->wr() = 0;
 	state_out->written(1);
 	report_state = false;
       }
-      if ( ! synchronized ) run_searching(); else run_decoding();
+      if ( synchronized )
+	run_decoding();
+      else {
+	if ( fastlock ) run_searching_fast(); else run_searching();
+      }
     }
 
     void run_searching() {
-      int chunk = SIZE_RSPACKET * (scan_syncs+1);
-      while ( in.readable() >= chunk+1 &&
-	      out.writable() >= chunk &&
+      bool next_sync = false;
+      int chunk = SIZE_RSPACKET * scan_syncs;
+      while ( in.readable() >= chunk+1 &&  // Need 1 ahead for bit shifting
+	      out.writable() >= chunk &&  // Use as temp buffer
 	      ( !state_out || state_out->writable()>=1 ) ) {
-	Tbyte *pin = in.rd(), *pend = pin+chunk;
-	Tbyte *pout = out.wr();
-	for ( ; pin<pend; ++pin,++pout ) {
-	  unsigned short w = ((unsigned short)pin[0]<<8) | pin[1];
-	  *pout = w >> bitphase;
-	}
-	for ( int i=0; i<SIZE_RSPACKET; ++i ) {
-	  int nsyncs = 0;
-	  Tbyte *p = &out.wr()[i];
-	  int phase8 = -1;
-	  for ( int j=0; j<scan_syncs; ++j,p+=SIZE_RSPACKET ) {
-	    Tbyte b = *p;
-	    if ( b==MPEG_SYNC )
-	      ++nsyncs;
-	    if ( b==MPEG_SYNC_INV ) phase8 = (8-j)&7;
-	  }
-	  if ( nsyncs>=want_syncs && phase8>=0 ) {
-	    if ( sch->debug ) fprintf(stderr, "Locked\n");
-	    if ( ! i ) {  // Avoid fixpoint detection
-	      i = SIZE_RSPACKET;
-	      phase8 = (phase8+1) & 7;
-	    }
-	    in.read(i);  // Skip until beginning
-	    synchronized = true;
-	    lock_timeleft = lock_timeout;
-	    if ( state_out ) {
-	      *state_out->wr() = 1;
-	      state_out->written(1);
-	    }
-	    return;
-	  }
-	}
+	if ( search_sync() ) return;
 	in.read(chunk);
+	// Switch to next bit alignment
 	++bitphase;
 	if ( bitphase == 8 ) {
 	  bitphase = 0;
+	  next_sync = true;
+	}
+      }
+
+      if ( next_sync ) {
+	// No lock this time
+	++next_sync_count;
+	if ( next_sync_count >= 3 ) {
+	  // After a few cycles without a lock, resync the deconvolver.
+	  next_sync_count = 0;
 	  deconv->next_sync();
 	}
       }
     }
 
+    void run_searching_fast() {
+      int chunk = SIZE_RSPACKET * scan_syncs;
+      while ( in.readable() >= chunk+1 &&  // Need 1 ahead for bit shifting
+	      out.writable() >= chunk &&  // Use as temp buffer
+	      ( !state_out || state_out->writable()>=1 ) ) {
+	// Try all bit alighments
+	for ( bitphase=0; bitphase<=7; ++bitphase ) {
+	  if ( search_sync() ) return;
+	}
+	in.read(SIZE_RSPACKET);
+      }
+    }
+
+    bool search_sync() {
+      int chunk = SIZE_RSPACKET * scan_syncs;
+      // Bit-shift [scan_sync] packets according to current [bitphase]
+      Tbyte *pin = in.rd(), *pend = pin+chunk;
+      Tbyte *pout = out.wr();
+      unsigned short w = *pin++;
+      for ( ; pin<=pend; ++pin,++pout ) {
+	w = (w<<8) | *pin;
+	*pout = w >> bitphase;
+      }
+      // Search for [want_sync] start codes at all 204 offsets
+      for ( int i=0; i<SIZE_RSPACKET; ++i ) {
+	int nsyncs_p=0, nsyncs_n=0;  // # start codes assuming pos/neg polarity
+	int phase8_p=-1, phase8_n=-1;  // Position in sequence of 8 packets
+	Tbyte *p = &out.wr()[i];
+	for ( int j=0; j<scan_syncs; ++j,p+=SIZE_RSPACKET ) {
+	  Tbyte b = *p;
+	  if ( b==MPEG_SYNC )     { ++nsyncs_p; phase8_n=(8-j)&7; }
+	  if ( b==MPEG_SYNC_INV ) { ++nsyncs_n; phase8_p=(8-j)&7; }
+	}
+	// Detect most likely polarity
+	int nsyncs, phase8;
+	if ( nsyncs_p > nsyncs_n)
+	  { polarity=0;  nsyncs=nsyncs_p; phase8=phase8_p; }
+	else
+	  { polarity=-1; nsyncs=nsyncs_n; phase8=phase8_n; }
+	if ( nsyncs>=want_syncs && phase8>=0 ) {
+	  if ( sch->debug ) fprintf(stderr, "Locked\n");
+	  if ( ! i ) {  // Avoid fixpoint detection in scheduler
+	    i = SIZE_RSPACKET;
+	    phase8 = (phase8+1) & 7;
+	  }
+	  in.read(i);  // Skip to first start code
+	  synchronized = true;
+	  lock_timeleft = lock_timeout;
+	  if ( state_out ) {
+	    *state_out->wr() = 1;
+	    state_out->written(1);
+	  }
+	  return true;
+	}
+      }
+      return false;
+    }
+
     void run_decoding() {
-      while ( in.readable() >= SIZE_RSPACKET+1 &&
+      while ( in.readable() >= SIZE_RSPACKET+1 &&  // +1 for bit shifting
 	      out.writable() >= SIZE_RSPACKET &&
-	       ( !state_out || state_out->writable()>=1 ) ) {
+	      ( !state_out || state_out->writable()>=1 ) ) {
 	Tbyte *pin = in.rd(), *pend = pin+SIZE_RSPACKET;
 	Tbyte *pout = out.wr();
-	for ( ; pin<pend; ++pin,++pout ) {
-	  unsigned short w = ((unsigned short)pin[0]<<8) | pin[1];
-	  *pout = w >> bitphase;
+	unsigned short w = *pin++;
+	for ( ; pin<=pend; ++pin,++pout ) {
+	  w = (w<<8) | *pin;
+	  *pout = (w >> bitphase) ^ polarity;
 	}
 	in.read(SIZE_RSPACKET);
 	Tbyte syncbyte = *out.wr();
@@ -476,6 +643,7 @@ namespace leansdr {
 	if ( ! lock_timeleft ) {
 	  if ( sch->debug ) fprintf(stderr, "Unlocked\n");
 	  synchronized = false;
+	  next_sync_count = 0;
 	  if ( state_out ) {
 	    *state_out->wr() = 0;
 	    state_out->written(1);
@@ -489,8 +657,10 @@ namespace leansdr {
     pipereader<Tbyte> in;
     pipewriter<Tbyte> out;
     deconvol_sync<Tbyte,0> *deconv;
+    unsigned char polarity;
     int bitphase;
     bool synchronized;
+    int next_sync_count;
     int phase8;
     unsigned long lock_timeleft;
     pipewriter<int> *state_out;

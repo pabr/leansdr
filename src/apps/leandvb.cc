@@ -35,6 +35,7 @@ struct config {
   cstln_lut<256>::predef constellation;
   code_rate fec;
   float Ftune;       // Bias frequency for the QPSK demodulator (Hz)
+  bool fastlock;
   bool filter;
 
   bool gui;          // Plot stuff
@@ -57,6 +58,7 @@ struct config {
       constellation(cstln_lut<256>::QPSK),
       fec(FEC12),
       Ftune(0),
+      fastlock(false),
       filter(false),
       gui(false),
       duration(60),
@@ -282,9 +284,11 @@ int run(config &cfg) {
 
   deconvol_sync_simple r_deconv =
     make_deconvol_sync_simple(&sch, p_symbols, p_bytes, cfg.fec);
+  r_deconv.fastlock = cfg.fastlock;
 
   pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
   mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, &r_deconv, &p_lock);
+  r_sync.fastlock = cfg.fastlock;
 
   // DEINTERLEAVING
 
@@ -399,6 +403,7 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --standard S   DVB-S (default), DVB-S2 (not implemented)\n"
 	  "  --const C      QPSK (default), 8PSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
+	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
 	  "  --filter       Filter baseband (CPU-intensive)\n"
 	  "  --hq           Enable all CPU-intensive features\n"
 	  );
@@ -472,9 +477,12 @@ int main(int argc, const char *argv[]) {
       else if ( ! strcmp(argv[i], "9/10" ) ) cfg.fec = FEC910;
       else usage(argv[0], stderr, 1);
     }
+    else if ( ! strcmp(argv[i], "--fastlock") )
+      cfg.fastlock = true;
     else if ( ! strcmp(argv[i], "--filter") )
       cfg.filter = true;
     else if ( ! strcmp(argv[i], "--hq") ) {
+      cfg.fastlock = true;
       cfg.filter = true;
     }
     else if ( ! strcmp(argv[i], "--anf") && i+1<argc )
