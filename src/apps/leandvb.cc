@@ -100,9 +100,10 @@ int run(config &cfg) {
   // Min buffer size for IQ symbols
   //   cstln_receiver: writes in chunks of 128/omega symbols (margin 128)
   //   deconv_sync: reads at least 64+32
-  unsigned long BUF_SYMBOLS = 256 * BUF_OVERSIZE;
+  // A larger buffer improves performance significantly.
+  unsigned long BUF_SYMBOLS = 1024 * BUF_OVERSIZE;
   // Min buffer size for unsynchronized bytes
-  //   deconv_sync: writes byte by byte
+  //   deconv_sync: writes 32 bytes
   //   mpeg_sync: reads up to 204*scan_syncs = 1632 bytes
   unsigned long BUF_BYTES = 2048 * BUF_OVERSIZE;
   // Min buffer size for synchronized (but interleaved) bytes
