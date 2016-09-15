@@ -117,6 +117,7 @@ namespace leansdr {
 	fprintf(stderr, "puncturing %d/%d\n", punctperiod, punctweight);
       deconv = new iq_t[punctperiod];
       deconv2 = new iq_t[punctperiod];
+      init_parity();
       inverse_convolution();
       init_syncs();
       locked = &syncs[0];
@@ -127,15 +128,29 @@ namespace leansdr {
       for ( ; x; x>>=1 ) h += x&1;
       return h;
     }
-    unsigned char parity(unsigned long x) {
-      unsigned char parity = 0;
-      for ( ; x; x>>=1 ) parity ^= x&1;
-      return parity;
+    inline unsigned char parity(unsigned char x) {
+      // TODO Optimize with assembly on x86
+      return lut_parity[x];
     }
-    unsigned char parity(unsigned long long x) {
-      unsigned char parity = 0;
-      for ( ; x; x>>=1 ) parity ^= x&1;
-      return parity;
+    inline unsigned char parity(unsigned long x) {
+      unsigned char p;
+      p  = lut_parity[(unsigned char) x     ];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      return p;
+    }
+    inline unsigned char parity(unsigned long long x) {
+      unsigned char p;
+      p  = lut_parity[(unsigned char) x     ];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      p ^= lut_parity[(unsigned char)(x>>=8)];
+      return p;
     }
 
     typedef unsigned long long signal_t;
@@ -180,6 +195,15 @@ namespace leansdr {
     bool fastlock;
 
   private:
+
+    unsigned char lut_parity[256];
+    void init_parity() {
+      for ( int i=0; i<256; ++i ) {
+	unsigned char p = 0;
+	for ( int x=i; x; x>>=1 ) p ^= x&1;
+	lut_parity[i] = p;
+      }
+    }
 
     static const int maxsbits = 64;
     iq_t response[maxsbits];
