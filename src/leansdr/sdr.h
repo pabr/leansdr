@@ -498,7 +498,7 @@ namespace leansdr {
 	    freq_out->written(1);
 	  }
 	  if ( ss_out ) {
-	    *ss_out->wr() = sqrtf(est_sp);
+	    *ss_out->wr() = sqrtf(est_insp);
 	    ss_out->written(1);
 	  }
 	  if ( mer_out ) {
