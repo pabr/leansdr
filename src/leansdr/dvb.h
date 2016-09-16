@@ -621,7 +621,7 @@ namespace leansdr {
 	  if ( b==MPEG_SYNC_INV ) { ++nsyncs_n; phase8_p=(8-j)&7; }
 	}
 	// Detect most likely polarity
-	int nsyncs, phase8;
+	int nsyncs;
 	if ( nsyncs_p > nsyncs_n)
 	  { polarity=0;  nsyncs=nsyncs_p; phase8=phase8_p; }
 	else
@@ -685,7 +685,7 @@ namespace leansdr {
     int bitphase;
     bool synchronized;
     int next_sync_count;
-    int phase8;
+    int phase8;  // Position in 8-packet cycle, -1 if not synchronized
     unsigned long lock_timeleft;
     pipewriter<int> *state_out;
     bool report_state;
@@ -720,7 +720,7 @@ namespace leansdr {
     pipewriter< rspacket<Tbyte> > out;
   };
 
-      static const int SIZE_TSPACKET = 188;
+  static const int SIZE_TSPACKET = 188;
   struct tspacket { u8 data[SIZE_TSPACKET]; };
 
   // DERANDOMIZATION

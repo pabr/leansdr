@@ -166,7 +166,10 @@ namespace leansdr {
     unsigned char metric;
   };
 
-  const float cstln_amp = 64;  // RMS
+  // Target RMS amplitude for AGC
+  //const float cstln_amp = 73;  // Best for 32APSK 9/10
+  //const float cstln_amp = 90;  // Best for QPSK
+  const float cstln_amp = 75;  // Trade-off
 
   template<int R>
   struct cstln_lut {
@@ -353,12 +356,18 @@ namespace leansdr {
       omega = _omega;
       min_omega = omega * (1-tol);
       max_omega = omega * (1+tol);
+      update_freq_limits();
     }
     
     void set_freq(float freq) {
       freqw = freq * 65536;
-      min_freqw = freqw - 65536/8;
-      max_freqw = freqw + 65536/8;
+      update_freq_limits();
+    }
+    void update_freq_limits() {
+      // Keep PLL away from +-symbolrate/4
+      // Note: Don't cast from negative float to unsigned on ARM.
+      min_freqw = (s_angle)(freqw - 65536/max_omega/8);
+      max_freqw = (s_angle)(freqw + 65536/max_omega/8);
     }
     
     void run() {
