@@ -12,24 +12,6 @@ namespace leansdr {
   template<typename T>
   T min(const T &x, const T &y) { return (x<y) ? x : y; }
 
-  template<typename T>
-  struct complex {
-    T re, im;
-    complex() { }
-    complex(T x) : re(x), im(0) { }
-    complex(T x, T y) : re(x), im(y) { }
-  };
-
-  template<typename T>
-  complex<T> operator +(const complex<T> &a, const complex<T> &b) {
-    return complex<T>(a.re+b.re, a.im+b.im);
-  }
-
-  template<typename T>
-  complex<T> operator *(const complex<T> &a, const T &k) {
-    return complex<T>(a.re*k, a.im*k);
-  }
-
   // [cconverter] converts complex streams between numric types,
   // with optionnal ofsetting and rational scaling.
   template<typename Tin, int Zin, typename Tout, int Zout, int Gn, int Gd>

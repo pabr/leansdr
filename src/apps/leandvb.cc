@@ -42,6 +42,7 @@ struct config {
   float duration;    // Horizontal span of timeline GUI (s)
   bool linger;       // Keep GUI running after EOF
   int fd_info;       // FD for status information in text format, or -1
+  int fd_const;      // FD for constellation and symbols, or -1
 
   config()
     : verbose(false),
@@ -63,7 +64,8 @@ struct config {
       gui(false),
       duration(60),
       linger(false),
-      fd_info(-1) {
+      fd_info(-1),
+      fd_const(-1) {
   }
 };
 
@@ -326,6 +328,20 @@ int run(config &cfg) {
     fprintf(f, "SR %f\n", cfg.Fm);
     fflush(f);
   }
+  if ( cfg.fd_const >= 0 ) {
+    cstln_lut<256> *c = demod.cstln;
+    if ( c ) {
+      // Output constellation immediately
+      FILE *f = fdopen(cfg.fd_const, "w");
+      fprintf(f, "CONST %d", c->nsymbols);
+      for ( int i=0; i<c->nsymbols; ++i )
+	fprintf(f, " %d,%d", c->symbols[i].re, c->symbols[i].im);
+      fprintf(f, "\n");
+      fflush(f);
+    }
+    new file_carrayprinter<f32>(&sch, "SYMBOLS %d", " %.0f,%.0f", "\n",
+				p_sampled, cfg.fd_const);
+  }
 
   // TIMELINE SCOPE
 
@@ -510,6 +526,8 @@ int main(int argc, const char *argv[]) {
       cfg.awgn = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--fd-info") && i+1<argc )
       cfg.fd_info = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--fd-const") && i+1<argc )
+      cfg.fd_const = atoi(argv[++i]);
     else
       usage(argv[0], stderr, 1);
   }

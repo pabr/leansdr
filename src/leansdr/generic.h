@@ -4,6 +4,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "leansdr/math.h"
+
 namespace leansdr {
 
 //////////////////////////////////////////////////////////////////////
@@ -93,6 +95,41 @@ private:
   pipereader<T> in;
   const char *format;
   int fdout;
+};
+
+// [file_listprinter] writes all data available from a [pipebuf]
+// to a file descriptor on a single line.
+// Special case for complex.
+
+template<typename T>
+struct file_carrayprinter : runnable {
+  file_carrayprinter(scheduler *sch,
+		     const char *_head,
+		     const char *_format,
+		     const char *_tail,
+		     pipebuf< complex<T> > &_in, int _fdout) :
+    runnable(sch, _in.name),
+    scale(1), in(_in),
+    head(_head), format(_format), tail(_tail),
+    fout(fdopen(_fdout,"w")) {
+  }
+  void run() {
+    int n = in.readable();
+    if ( n && fout ) {
+      fprintf(fout, head, n);
+      complex<T> *pin=in.rd(), *pend=pin+n;
+      for ( ; pin<pend; ++pin )
+	fprintf(fout, format, pin->re*scale, pin->im*scale);
+      fprintf(fout, tail);
+      fflush(fout);
+    }
+    in.read(n);
+  }
+  T scale;
+private:
+  pipereader< complex<T> > in;
+  const char *head, *format, *tail;
+  FILE *fout;
 };
 
 // [itemcounter] writes the number of input items to the output [pipebuf].
