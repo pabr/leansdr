@@ -1,13 +1,13 @@
 # Versioning
 
-Recommended versions are tagged "x.y.z".
+Recommended commits are tagged "x.y.z".
 
 * New z = Bugs fixed.
 * New y = Features added.
 * New x = Backward compatibility is not guaranteed.
 
-Each git commit normally passes QA tests.  Users are encouraged
-to always test the latest version.
+Each tagged commit normally passes QA tests.  Users are
+encouraged to always test the latest version.
 
 # Coding style
 
