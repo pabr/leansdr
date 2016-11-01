@@ -1,11 +1,13 @@
-HEAD
+2016-09-16 v1.1.0
   * Support for DVB-S2 constellations (not FEC).
   * Fixed --derotate.
   * Fixed excess deconvolution errors with FEC7/8.
   * Added simple baseband filter (not RRC).
   * Added --fastlock mode for low SR and off-line processing.
+  * Added leandvb_vt100ui.sh with constellation plot.
 
-2016-09-04 First release from git, commit f254bdb939e3de59d862386773f1e335eef5dd12
+2016-09-04 v1.0.0
+  * Development moved to git and github.
   * leandvb is now distributed as part of leansdr.
   * Support for all DVB-S code rates.
   * Status output for third-party UIs: lock, MER, frequency offset.

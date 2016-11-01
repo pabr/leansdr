@@ -1,3 +1,16 @@
+# Versioning
+
+Recommended versions are tagged "x.y.z".
+
+* New z = Bugs fixed.
+* New y = Features added.
+* New x = Backward compatibility is not guaranteed.
+
+Each git commit normally passes QA tests.  Users are encouraged
+to always test the latest version.
+
+# Coding style
+
 leansdr uses C++ for namespaces and type-safe polymorphism.
 No attempt is made to follow popular object-oriented practices.
 
@@ -11,7 +24,6 @@ No attempt is made to follow popular object-oriented practices.
 
 * Dependencies are kept to a minimum (no STL, no iostream).
 
-Other notes:
+# Known limitations
 
-* The code is not thread-safe.
-
+* The code is not intended to be thread-safe.
