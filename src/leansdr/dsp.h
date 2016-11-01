@@ -13,11 +13,9 @@ namespace leansdr {
   T min(const T &x, const T &y) { return (x<y) ? x : y; }
 
   // [cconverter] converts complex streams between numric types,
-  // with optionnal ofsetting and rational scaling.
+  // with optional ofsetting and rational scaling.
   template<typename Tin, int Zin, typename Tout, int Zout, int Gn, int Gd>
   struct cconverter : runnable {
-    pipereader< complex<Tin> > in;
-    pipewriter< complex<Tout> > out;
     cconverter(scheduler *sch, pipebuf< complex<Tin> > &_in,
 	       pipebuf< complex<Tout> > &_out) 
       : runnable(sch, "cconverter"),
@@ -34,6 +32,9 @@ namespace leansdr {
       in.read(count);
       out.written(count);
     }
+  private:
+    pipereader< complex<Tin> > in;
+    pipewriter< complex<Tout> > out;
   };
   
   template<typename T>
@@ -116,6 +117,28 @@ namespace leansdr {
   private:
     pipereader<T> in1, in2;
     pipewriter<T> out;
+  };
+  
+  template<typename Tscale, typename Tin, typename Tout>
+  struct scaler : runnable {
+    Tscale scale;
+    scaler(scheduler *sch, Tscale _scale,
+	   pipebuf<Tin> &_in, pipebuf<Tout> &_out)
+      : runnable(sch, "scaler"),
+	scale(_scale),
+	in(_in), out(_out) {
+    }
+    void run() {
+      unsigned long count = min(in.readable(), out.writable());
+      Tin *pin=in.rd(), *pend=pin+count;
+      Tout *pout = out.wr();
+      for ( ; pin<pend; ++pin,++pout ) *pout = *pin * scale;
+      in.read(count);
+      out.written(count);
+    }
+  private:
+    pipereader<Tin> in;
+    pipewriter<Tout> out;
   };
   
   // [awgb_c] generates complex white gaussian noise.

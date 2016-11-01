@@ -23,6 +23,7 @@ using namespace leansdr;
 struct config {
   bool verbose, debug;
   enum { INPUT_U8, INPUT_F32 } input_format;
+  float float_scale; // Scaling factor for float data.
   bool loop_input;
   float Fs;          // Sampling frequency (Hz) 
   float Fderot;      // Shift the signal (Hz). Note: Ftune is faster
@@ -48,6 +49,7 @@ struct config {
     : verbose(false),
       debug(false),
       input_format(INPUT_U8),
+      float_scale(1.0),
       loop_input(false),
       Fs(2.4e6),
       Fderot(0),
@@ -127,24 +129,18 @@ int run(config &cfg) {
     file_reader<cu8> *r_stdin =
       new file_reader<cu8>(&sch, 0, *p_stdin);
     r_stdin->loop = cfg.loop_input;
-    cconverter<u8,128,f32,0,1,1> *r_convert =
-      new cconverter<u8,128,f32,0,1,1>(&sch, *p_stdin, p_rawiq);
+    cconverter<u8,128, f32,0, 1,1> *r_convert =
+      new cconverter<u8,128, f32,0, 1,1>(&sch, *p_stdin, p_rawiq);
   }
   if ( cfg.input_format == config::INPUT_F32 ) {
-#if 0 // TBD
-    file_reader<cf32> *r_stdin =
-      new file_reader<cf32>(&sch, 0, p_rawiq);
-    r_stdin->loop = cfg.loop_input;
-#else
     fprintf(stderr, "TBD SCALING GAIN F32\n");
     pipebuf<cf32> *p_stdin =
       new pipebuf<cf32>(&sch, "stdin", BUF_BASEBAND);
     file_reader<cf32> *r_stdin =
       new file_reader<cf32>(&sch, 0, *p_stdin);
     r_stdin->loop = cfg.loop_input;
-    cconverter<f32,0,f32,0,128,1> *r_convert =
-      new cconverter<f32,0,f32,0,128,1>(&sch, *p_stdin, p_rawiq);
-#endif
+    scaler<float,cf32,cf32> *r_scale =
+      new scaler<float,cf32,cf32>(&sch, cfg.float_scale, *p_stdin, p_rawiq);
   }
 
 #ifdef GUI
@@ -517,6 +513,8 @@ int main(int argc, const char *argv[]) {
       cfg.input_format = config::INPUT_F32;
     else if ( ! strcmp(argv[i], "--u8") )
       cfg.input_format = config::INPUT_U8;
+    else if ( ! strcmp(argv[i], "--float-scale") && i+1<argc )
+      cfg.float_scale = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--loop") )
       cfg.loop_input = true;
     else if ( ! strcmp(argv[i], "--derotate") && i+1<argc )

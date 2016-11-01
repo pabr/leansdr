@@ -1,3 +1,8 @@
+HEAD
+  * Added --float-scale..
+  * Documented --fd-const.
+  * Renamed --probesize (was --maxsend).
+
 2016-09-16 v1.1.0
   * Support for DVB-S2 constellations (not FEC).
   * Fixed --derotate.
