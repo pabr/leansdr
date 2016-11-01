@@ -235,7 +235,7 @@ int main(int argc, const char *argv[]) {
       cfg.verbose = true;
     else if ( ! strcmp(argv[i], "--timeout") && i+1<argc )
       cfg.timeout = atof(argv[++i]);
-    else if ( ! strcmp(argv[i], "--maxsend") && i+1<argc )
+    else if ( ! strcmp(argv[i], "--probesize") && i+1<argc )
       cfg.maxsend = atoll(argv[++i]);
     else if ( ! strcmp(argv[i], "--rewind") )
       cfg.rewind = true;

@@ -430,6 +430,7 @@ void usage(const char *name, FILE *f, int c) {
 	  "  -v             Output debugging info at startup and exit\n"
 	  "  -d             Output debugging info during operation\n"
 	  "  --fd-info NUM  Output demodulator status to file descriptor\n"
+	  "  --fd-const NUM Output constellation and symbols to file descr\n"
 	  );
 #ifdef GUI
   fprintf(f,
