@@ -36,6 +36,7 @@ struct config {
   cstln_lut<256>::predef constellation;
   code_rate fec;
   float Ftune;       // Bias frequency for the QPSK demodulator (Hz)
+  bool allow_drift;
   bool fastlock;
   bool filter;
 
@@ -61,6 +62,7 @@ struct config {
       constellation(cstln_lut<256>::QPSK),
       fec(FEC12),
       Ftune(0),
+      allow_drift(false),
       fastlock(false),
       filter(false),
       gui(false),
@@ -133,7 +135,6 @@ int run(config &cfg) {
       new cconverter<u8,128, f32,0, 1,1>(&sch, *p_stdin, p_rawiq);
   }
   if ( cfg.input_format == config::INPUT_F32 ) {
-    fprintf(stderr, "TBD SCALING GAIN F32\n");
     pipebuf<cf32> *p_stdin =
       new pipebuf<cf32>(&sch, "stdin", BUF_BASEBAND);
     file_reader<cf32> *r_stdin =
@@ -259,7 +260,14 @@ int run(config &cfg) {
       fprintf(stderr, "Biasing receiver to %.3f kHz\n", cfg.Ftune/1e3);
     demod.set_freq(cfg.Ftune/cfg.Fs);
   }
+  if ( cfg.allow_drift )
+    demod.set_allow_drift(true);
   demod.meas_decimation = 128*1024;
+
+  if ( cfg.verbose )
+    fprintf(stderr, "Frequency offset limits: %+.0f..%+.0f Hz.\n",
+	    (s_angle)demod.min_freqw*cfg.Fs/65536,
+	    (s_angle)demod.max_freqw*cfg.Fs/65536);
 
 #ifdef GUI
   if ( cfg.gui ) {
@@ -376,7 +384,7 @@ int run(config &cfg) {
   }
 #endif  // GUI
 
-  if ( cfg.verbose )
+  if ( cfg.debug )
     fprintf(stderr,
 	    "Output:\n"
 	    "  '_': packet received without errors\n"
@@ -413,6 +421,7 @@ void usage(const char *name, FILE *f, int c) {
 	  "\nDVB-S options:\n"
 	  "  --sr HZ        Symbol rate (default: 2e6)\n"
 	  "  --tune HZ      Bias frequency for demodulation\n"
+	  "  --drift        Track frequency drift beyond safe limits\n"
 	  "  --standard S   DVB-S (default), DVB-S2 (not implemented)\n"
 	  "  --const C      QPSK (default), 8PSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
@@ -503,6 +512,8 @@ int main(int argc, const char *argv[]) {
       cfg.anf = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--tune") && i+1<argc )
       cfg.Ftune = atof(argv[++i]);
+    else if ( ! strcmp(argv[i], "--drift") )
+      cfg.allow_drift = true;
     else if  ( ! strcmp(argv[i], "--gui") )
       cfg.gui = true;
     else if ( ! strcmp(argv[i], "--duration") && i+1<argc )

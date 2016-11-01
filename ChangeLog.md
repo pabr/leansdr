@@ -1,5 +1,6 @@
 HEAD
-  * Added --float-scale..
+  * Added --drift.
+  * Added --float-scale.
   * Documented --fd-const.
   * Renamed --probesize (was --maxsend).
 

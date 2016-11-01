@@ -323,6 +323,7 @@ namespace leansdr {
     unsigned long meas_decimation;      // Measurement rate
     float omega, min_omega, max_omega;  // Samples per symbol
     u_angle freqw, min_freqw, max_freqw;  // Freq offset in angle per sample
+    bool allow_drift;                   // Follow carrier beyond safe limits
     static const unsigned int chunk_size = 128;
     float kest;
     
@@ -336,6 +337,7 @@ namespace leansdr {
       : runnable(sch, "Constellation receiver"),
 	cstln(NULL),
 	meas_decimation(1048576),
+	allow_drift(false),
 	kest(0.01),
 	in(_in), out(_out, chunk_size),
 	est_insp(cstln_amp*cstln_amp), agc_gain(1),
@@ -363,11 +365,24 @@ namespace leansdr {
       freqw = freq * 65536;
       update_freq_limits();
     }
+
+    void set_allow_drift(bool d) {
+      allow_drift = d;
+      update_freq_limits();
+    }
+
     void update_freq_limits() {
-      // Keep PLL away from +-symbolrate/4
-      // Note: Don't cast from negative float to unsigned on ARM.
-      min_freqw = (s_angle)(freqw - 65536/max_omega/8);
-      max_freqw = (s_angle)(freqw + 65536/max_omega/8);
+      if ( ! allow_drift ) {
+	// Prevent PLL from locking at +-symbolrate/4.
+	// TODO The +-SR/8 limit is suitable for QPSK only.
+	// Note: Don't cast from negative float to unsigned on ARM.
+	min_freqw = (s_angle)(freqw - 65536/max_omega/8);
+	max_freqw = (s_angle)(freqw + 65536/max_omega/8);
+      } else {
+	// Track frequency error up/down to band edges.
+	max_freqw = 32767 * (1-1/max_omega);
+	min_freqw = 65536 - max_freqw;
+      }
     }
     
     void run() {
