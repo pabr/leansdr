@@ -169,6 +169,8 @@ namespace leansdr {
   // Target RMS amplitude for AGC
   //const float cstln_amp = 73;  // Best for 32APSK 9/10
   //const float cstln_amp = 90;  // Best for QPSK
+  //const float cstln_amp = 64;  // Best for BPSK
+  //const float cstln_amp = 75;  // Best for BPSK at 45°
   const float cstln_amp = 75;  // Trade-off
 
   template<int R>
@@ -181,8 +183,13 @@ namespace leansdr {
       case BPSK:
 	nsymbols = 2;
 	symbols = new complex<signed char>[nsymbols];
+#if 0  // BPSK at 0°
 	symbols[0] = polar(1, 2, 0);
 	symbols[1] = polar(1, 2, 1);
+#else  // BPSK at 45°
+	symbols[0] = polar(1, 8, 1);
+	symbols[1] = polar(1, 8, 5);
+#endif
 	make_lut_from_symbols();
 	break;
       case QPSK:
