@@ -154,6 +154,30 @@ private:
   pipewriter<Tout> out;
 };
 
+// [decimator] forwards 1 in N sample.
+
+template<typename T>
+struct decimator : runnable {
+  unsigned int d;
+
+  decimator(scheduler *sch, int _d, pipebuf<T> &_in, pipebuf<T> &_out)
+    : runnable(sch, "decimator"),
+      d(_d),
+      in(_in), out(_out) {
+  }
+  void run() {
+    unsigned long count = min(in.readable()/d, out.writable());
+    T *pin=in.rd(), *pend=pin+count*d, *pout=out.wr();
+    for ( ; pin<pend; pin+=d, ++pout )
+      *pout = *pin;
+    in.read(count*d);
+    out.written(count);
+  }
+private:
+  pipereader<T> in;
+  pipewriter<T> out;
+};
+
 }  // namespace
 
 #endif  // LEANSDR_GENERIC_H
