@@ -218,6 +218,9 @@ namespace leansdr {
   inline long double     gen_atan2(long double y, long double x)
   { return atan2l(y,x); }
 
+  template<typename T>
+  T min(const T &x, const T &y) { return (x<y) ? x : y; }
+
 }  // namespace
 
 #endif  // LEANSDR_FRAMEWORK_H

@@ -9,9 +9,6 @@ namespace leansdr {
   // DSP blocks
   //////////////////////////////////////////////////////////////////////
   
-  template<typename T>
-  T min(const T &x, const T &y) { return (x<y) ? x : y; }
-
   // [cconverter] converts complex streams between numric types,
   // with optional ofsetting and rational scaling.
   template<typename Tin, int Zin, typename Tout, int Zout, int Gn, int Gd>
