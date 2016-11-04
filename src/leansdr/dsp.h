@@ -194,6 +194,39 @@ namespace leansdr {
     int w;
   };
 
+  template<typename T, typename Tc>
+  struct fir_filter : runnable {
+    unsigned int ncoeffs;
+    Tc *coeffs;
+
+    fir_filter(scheduler *sch, int _ncoeffs, Tc *_coeffs,
+	       pipebuf<T> &_in, pipebuf<T> &_out)
+      : runnable(sch, "fir_filter"),
+	ncoeffs(_ncoeffs), coeffs(_coeffs),
+	in(_in), out(_out) {
+    }
+    
+    void run() {
+      if ( in.readable() < ncoeffs ) return;
+      unsigned long count = min(in.readable()-ncoeffs, out.writable());
+      T *pin=in.rd()+ncoeffs, *pend=pin+count, *pout=out.wr();
+      for ( ; pin<pend; ++pin,++pout ) {
+	Tc *pc = coeffs;
+	T *pi = pin;
+	T x = 0;
+	for ( unsigned int i=ncoeffs; i--; ++pc,--pi )
+	  x = x + (*pc)*(*pi);
+	*pout = x;
+      }
+      in.read(count);
+      out.written(count);
+    }
+    
+  private:
+    pipereader<T> in;
+    pipewriter<T> out;
+  };
+
 }  // namespace
 
 #endif  // LEANSDR_DSP_H
