@@ -389,20 +389,8 @@ namespace leansdr {
       if ( ! cstln ) fail("constellation not set");
       
       // Magic constants that work with the qa recordings.
-      signed long freq_alpha = 0.04 * 65536;
-      signed long freq_beta = 0.001 * 65536;
-#if 1
-      freq_alpha *= 10;
-      freq_beta *= 10;
-      fprintf(stderr, "DEBUG FAST FREQ TRACKING %ld %ld\n",
-	      freq_alpha, freq_beta);
-#endif
-#if 0
-      freq_alpha *= 0.1;
-      freq_beta *= 0.1;
-      fprintf(stderr, "DEBUG SLOW FREQ TRACKING %ld %ld\n",
-	      freq_alpha, freq_beta);
-#endif
+      const signed long freq_alpha = 0.04 * 65536;
+      const signed long freq_beta = 0.001 * 65536;
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
       
       int max_meas = chunk_size/meas_decimation + 1;
