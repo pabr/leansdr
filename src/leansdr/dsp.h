@@ -196,35 +196,67 @@ namespace leansdr {
 
   template<typename T, typename Tc>
   struct fir_filter : runnable {
-    unsigned int ncoeffs;
-    Tc *coeffs;
-
     fir_filter(scheduler *sch, int _ncoeffs, Tc *_coeffs,
-	       pipebuf<T> &_in, pipebuf<T> &_out)
+	       pipebuf<T> &_in, pipebuf<T> &_out,
+	       unsigned int _decim=1)
       : runnable(sch, "fir_filter"),
 	ncoeffs(_ncoeffs), coeffs(_coeffs),
-	in(_in), out(_out) {
+	in(_in), out(_out),
+	decim(_decim),
+	freq_tap(NULL), tap_multiplier(1), freq_tol(0.1) {
+      shifted_coeffs = new T[ncoeffs];
+      set_freq(0);
     }
     
     void run() {
       if ( in.readable() < ncoeffs ) return;
-      unsigned long count = min(in.readable()-ncoeffs, out.writable());
-      T *pin=in.rd()+ncoeffs, *pend=pin+count, *pout=out.wr();
-      for ( ; pin<pend; ++pin,++pout ) {
-	Tc *pc = coeffs;
+
+      if ( freq_tap ) {
+	float new_freq = *freq_tap * tap_multiplier;
+	if ( fabs(current_freq-new_freq) > freq_tol )
+	  set_freq(new_freq);
+      }
+
+      unsigned long count = min((in.readable()-ncoeffs)/decim,
+				out.writable());
+      T *pin=in.rd()+ncoeffs, *pend=pin+count*decim, *pout=out.wr();
+      // TBD use coeffs when current_freq=0 (fewer mults if float)
+      for ( ; pin<pend; pin+=decim,++pout ) {
+	T *pc = shifted_coeffs;
 	T *pi = pin;
 	T x = 0;
 	for ( unsigned int i=ncoeffs; i--; ++pc,--pi )
 	  x = x + (*pc)*(*pi);
 	*pout = x;
       }
-      in.read(count);
+      in.read(count*decim);
       out.written(count);
     }
     
   private:
+    unsigned int ncoeffs;
+    Tc *coeffs;
     pipereader<T> in;
     pipewriter<T> out;
+    unsigned int decim;
+
+    T *shifted_coeffs; 
+    float current_freq;
+    void set_freq(float f) {
+      fprintf(stderr, "Shifting filter %f -> %f\n", current_freq, f);
+      for ( int i=0; i<ncoeffs; ++i ) {
+	float c, s;
+	sincosf(2*M_PI*f*i, &s, &c);
+	// TBD Support T=complex
+	shifted_coeffs[i].re = coeffs[i] * c;
+	shifted_coeffs[i].im = coeffs[i] * s;
+      }
+      current_freq = f;
+    }
+  public:
+    float *freq_tap;
+    float tap_multiplier;
+    float freq_tol;
   };
 
 }  // namespace
