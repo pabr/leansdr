@@ -329,7 +329,7 @@ namespace leansdr {
     cstln_lut<256> *cstln;
     unsigned long meas_decimation;      // Measurement rate
     float omega, min_omega, max_omega;  // Samples per symbol
-    u_angle freqw, min_freqw, max_freqw;  // Freq offset in angle per sample
+    signed long freqw, min_freqw, max_freqw;  // Freq offs (angle per sample)
     bool allow_drift;                   // Follow carrier beyond safe limits
     static const unsigned int chunk_size = 128;
     float kest;
@@ -371,33 +371,38 @@ namespace leansdr {
     void set_freq(float freq) {
       freqw = freq * 65536;
       update_freq_limits();
+      refresh_freq_tap();
     }
 
     void set_allow_drift(bool d) {
       allow_drift = d;
-      update_freq_limits();
     }
 
     void update_freq_limits() {
-      if ( ! allow_drift ) {
-	// Prevent PLL from locking at +-symbolrate/4.
-	// TODO The +-SR/8 limit is suitable for QPSK only.
-	// Note: Don't cast from negative float to unsigned on ARM.
-	min_freqw = (s_angle)(freqw - 65536/max_omega/8);
-	max_freqw = (s_angle)(freqw + 65536/max_omega/8);
-      } else {
-	// Track frequency error up/down to band edges.
-	max_freqw = 32767 * (1-1/max_omega);
-	min_freqw = 65536 - max_freqw;
-      }
+      // Prevent PLL from locking at +-symbolrate/4.
+      // TODO The +-SR/8 limit is suitable for QPSK only.
+      min_freqw = freqw - 65536/max_omega/8;
+      max_freqw = freqw + 65536/max_omega/8;
     }
     
     void run() {
       if ( ! cstln ) fail("constellation not set");
       
       // Magic constants that work with the qa recordings.
-      const signed long freq_alpha = 0.04 * 65536;
-      const signed long freq_beta = 0.001 * 65536;
+      signed long freq_alpha = 0.04 * 65536;
+      signed long freq_beta = 0.001 * 65536;
+#if 1
+      freq_alpha *= 10;
+      freq_beta *= 10;
+      fprintf(stderr, "DEBUG FAST FREQ TRACKING %ld %ld\n",
+	      freq_alpha, freq_beta);
+#endif
+#if 0
+      freq_alpha *= 0.1;
+      freq_beta *= 0.1;
+      fprintf(stderr, "DEBUG SLOW FREQ TRACKING %ld %ld\n",
+	      freq_alpha, freq_beta);
+#endif
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
       
       int max_meas = chunk_size/meas_decimation + 1;
@@ -515,17 +520,20 @@ namespace leansdr {
 	// This is best done periodically ouside the inner loop,
 	// but will cause non-deterministic output.
 	
-	if ( (signed short)(freqw-min_freqw)<0 ||
-	     (signed short)(max_freqw-freqw)<0 )
-	  freqw = min_freqw + (unsigned short)(max_freqw-min_freqw) / 2;
+	if ( ! allow_drift ) {
+	  if ( freqw < min_freqw || freqw > max_freqw )
+	    freqw = (max_freqw+min_freqw) / 2;
+	}
       
 	// Output measurements
 	
+	refresh_freq_tap();
+
 	meas_count += pin-pin0;
 	while ( meas_count >= meas_decimation ) {
 	  meas_count -= meas_decimation;
 	  if ( freq_out ) {
-	    *freq_out->wr() = (float)(signed short)freqw / 65536;
+	    *freq_out->wr() = freq_tap;
 	    freq_out->written(1);
 	  }
 	  if ( ss_out ) {
@@ -543,6 +551,10 @@ namespace leansdr {
       }  // Work to do
     }
     
+    float freq_tap;
+    void refresh_freq_tap() {
+      freq_tap = (float)freqw / 65536;
+    }
   private:
     struct {
       complex<float> p;  // Received symbol
