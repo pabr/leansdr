@@ -389,14 +389,16 @@ namespace leansdr {
       if ( ! cstln ) fail("constellation not set");
       
       // Magic constants that work with the qa recordings.
-      const signed long freq_alpha = 0.04 * 65536;
-      const signed long freq_beta = 0.001 * 65536;
+      signed long freq_alpha = 0.04 * 65536;
+      signed long freq_beta = 0.0012 * 65536 / omega;
+      if ( ! freq_beta ) fail("Excessive oversampling");
+
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
       
       int max_meas = chunk_size/meas_decimation + 1;
       // Largin margin on output_size because mu adjustments
       // can lead to more than chunk_size/min_omega symbols.
-      while ( in.readable() >= chunk_size+1 &&
+      while ( in.readable() >= chunk_size+1 &&  // +1 for interpolation
 	      out.writable() >= chunk_size &&
 	      ( !freq_out  || freq_out ->writable()>=max_meas ) &&
 	      ( !ss_out    || ss_out   ->writable()>=max_meas ) &&
@@ -483,28 +485,31 @@ namespace leansdr {
 	
 	in.read(pin-pin0);
 	out.written(pout-pout0);
+
+	if ( cstln_point ) {
+	  
+	  // Output the last interpolated PSK symbol, max once per chunk_size
+	  if ( cstln_out ) {
+	    *cstln_out->wr() = s;
+	    cstln_out->written(1);
+	  }
 	
-	// Output the last interpolated PSK symbol, once per chunk_size
-	if ( cstln_out ) {
-	  *cstln_out->wr() = s;
-	  cstln_out->written(1);
+	  // AGC
+	  // For APSK we must do AGC on the symbols, not the whole signal.
+	  float insp = sg.re*sg.re + sg.im*sg.im;
+	  est_insp = insp*kest + est_insp*(1-kest);
+	  if ( est_insp )
+	    agc_gain = cstln_amp / gen_sqrt(est_insp);
+	  
+	  // SS and MER
+	  float sig_power = s.re*s.re+s.im*s.im;
+	  est_sp = sig_power*kest + est_sp*(1-kest);
+	  complex<float> errvect(s.re-cstln_point->re, s.im-cstln_point->im);
+	  float errvect_power = errvect.re*errvect.re + errvect.im*errvect.im;
+	  est_ep = errvect_power*kest + est_ep*(1-kest);
+	
 	}
-	
-	// AGC
-	// For APSK we must do AGC on the symbols, not the whole signal.
-	float insp = sg.re*sg.re + sg.im*sg.im;
-	est_insp = insp*kest + est_insp*(1-kest);
-	if ( est_insp )
-	  agc_gain = cstln_amp / gen_sqrt(est_insp);
-	
-	// SS and MER
-	float sig_power = s.re*s.re+s.im*s.im;
-	est_sp = sig_power*kest + est_sp*(1-kest);
-	if ( ! cstln_point ) fail("No sample");
-	complex<float> errvect(s.re-cstln_point->re, s.im-cstln_point->im);
-	float errvect_power = errvect.re*errvect.re + errvect.im*errvect.im;
-	est_ep = errvect_power*kest + est_ep*(1-kest);
-	
+
 	// This is best done periodically ouside the inner loop,
 	// but will cause non-deterministic output.
 	
