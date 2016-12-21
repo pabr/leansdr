@@ -2,6 +2,8 @@
 #define LEANSDR_DSP_H
 
 #include <math.h>
+#include "leansdr/framework.h"
+#include "leansdr/math.h"
 
 namespace leansdr {
 
@@ -37,7 +39,7 @@ namespace leansdr {
   template<typename T>
   struct cfft_engine {
     const int n;
-    cfft_engine(int _n) : n(_n), invsqrtn(1/sqrt(n)) {
+    cfft_engine(int _n) : n(_n), invsqrtn(1.0/sqrt(n)) {
       // Compute log2(n)
       logn = 0;
       for ( int t=n; t>1; t>>=1 ) ++logn;
@@ -81,10 +83,12 @@ namespace leansdr {
 	  }
 	}
       }
-      float invn = 1.0 / n;
-      for ( int i=0; i<n; ++i ) {
-	data[i].re *= invn;
-	data[i].im *= invn;
+      if ( reverse ) {
+	float invn = 1.0 / n;
+	for ( int i=0; i<n; ++i ) {
+	  data[i].re *= invn;
+	  data[i].im *= invn;
+	}
       }
     }
   private:
