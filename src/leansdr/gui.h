@@ -242,6 +242,7 @@ namespace leansdr {
 	COUNT = 2,  // Display number of items read instead of value
 	SUM   = 4,  // Display sum of values
 	LINE  = 8,  // Connect points
+	WRAP  = 16, // Modulo min..max
       } flags;
     };
     unsigned long samples_per_pixel;
@@ -284,7 +285,10 @@ namespace leansdr {
 	      c->accum += v;
 	    else {
 	      c->print_val = v;
-	      y = g.h - g.h*(v-c->spec.ymin)/(c->spec.ymax-c->spec.ymin);
+	      float nv = (v-c->spec.ymin) / (c->spec.ymax-c->spec.ymin);
+	      if ( c->spec.flags & chanspec::WRAP )
+		nv = nv - floor(nv);
+	      y = g.h - g.h*nv;
 	    }
 	    c->in->read(1);
 	  }
