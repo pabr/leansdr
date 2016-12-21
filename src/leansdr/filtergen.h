@@ -17,12 +17,12 @@ namespace leansdr {
     // Generate coefficients for a sinc filter.
 
     template<typename T>
-    int lowpass(int order, float bw, T **coeffs) {
+    int lowpass(int order, float Fcut, T **coeffs) {
       int ncoeffs = order + 1;
       *coeffs = new T[ncoeffs];
       for ( int i=0; i<ncoeffs; ++i ) {
 	float t = i - (ncoeffs-1)*0.5;
-	float sinc = 2*bw * (t ? sin(2*M_PI*bw*t)/(2*M_PI*bw*t) : 1);
+	float sinc = 2*Fcut * (t ? sin(2*M_PI*Fcut*t)/(2*M_PI*Fcut*t) : 1);
 #if 0  // Hamming 
 	float alpha = 25.0/46, beta = 21.0/46;
 	float window = alpha - beta*cos(2*M_PI*i/order);
@@ -35,6 +35,14 @@ namespace leansdr {
       return ncoeffs;
     }
     
+    template<typename T>
+    int root_raised_cosine (float Fm, float Fs, float rolloff, T **coeffs) {
+      int ncoeffs = 0;
+      *coeffs = new T[ncoeffs];
+      fail("not implemented");
+      return ncoeffs;
+    }
+
   }  // namespace
 }  // namespace
 
