@@ -237,27 +237,30 @@ namespace leansdr {
       float scale;
       float ymin, ymax;
       enum flag {
-	DEFAULT = 0,
-	ASYNC = 1,  // Read whatever is available
-	COUNT = 2,  // Display number of items read instead of value
-	SUM   = 4,  // Display sum of values
-	LINE  = 8,  // Connect points
-	WRAP  = 16, // Modulo min..max
+	DEFAULT  = 0,
+	ASYNC    = 1,  // Read whatever is available
+	COUNT    = 2,  // Display number of items read instead of value
+	SUM      = 4,  // Display sum of values
+	LINE     = 8,  // Connect points
+	WRAP     = 16, // Modulo min..max
+	DISABLED = 32, // Ignore channel
       } flags;
     };
     unsigned long samples_per_pixel;
     float sample_freq;  // Sample rate in Hz (used for cursor operations)
-    slowmultiscope(scheduler *sch, const chanspec *specs, int _nchans,
+    slowmultiscope(scheduler *sch, const chanspec *specs, int nspecs,
 		   const char *_name)
       : runnable(sch, _name?_name:"slowmultiscope"),
 	samples_per_pixel(1), sample_freq(1),
-	nchans(_nchans),
 	g(sch, name), t(0), x(0), total_samples(0) {
-      chans = new channel[nchans];
-      for ( int i=0; i<nchans; ++i ) {
-	chans[i].spec = specs[i];
-	chans[i].in = new pipereader<T>(*specs[i].in);
-	chans[i].accum = 0;
+      chans = new channel[nspecs];
+      nchans = 0;
+      for ( int i=0; i<nspecs; ++i ) {
+	if ( specs[i].flags & chanspec::DISABLED ) continue;
+	chans[nchans].spec = specs[i];
+	chans[nchans].in = new pipereader<T>(*specs[i].in);
+	chans[nchans].accum = 0;
+	++nchans;
       }
       g.clear();
     }
