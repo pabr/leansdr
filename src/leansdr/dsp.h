@@ -217,8 +217,12 @@ namespace leansdr {
 
       if ( freq_tap ) {
 	float new_freq = *freq_tap * tap_multiplier;
-	if ( fabs(current_freq-new_freq) > freq_tol )
+	if ( fabs(current_freq-new_freq) > freq_tol ) {
+	  if ( sch->verbose )
+	    fprintf(stderr, "Shifting filter %f -> %f\n",
+		    current_freq, new_freq);
 	  set_freq(new_freq);
+	}
       }
 
       unsigned long count = min((in.readable()-ncoeffs)/decim,
@@ -247,7 +251,6 @@ namespace leansdr {
     T *shifted_coeffs; 
     float current_freq;
     void set_freq(float f) {
-      fprintf(stderr, "Shifting filter %f -> %f\n", current_freq, f);
       for ( int i=0; i<ncoeffs; ++i ) {
 	float c, s;
 	sincosf(2*M_PI*f*i, &s, &c);
