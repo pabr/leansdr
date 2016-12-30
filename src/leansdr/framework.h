@@ -37,6 +37,7 @@ namespace leansdr {
     const char *name;
     runnable_common(const char *_name) : name(_name) { }
     virtual void run() { }
+    virtual void shutdown() { }
   };
   
   struct window_placement {
@@ -77,7 +78,10 @@ namespace leansdr {
 	prev_hash = h;
       }
     }
-    
+    void shutdown() {
+      for ( int i=0; i<nrunnables; ++i )
+	runnables[i]->shutdown();
+    }
     unsigned long long hash() {
       unsigned long long h = 0;
       for ( int i=0; i<npipes; ++i ) h += (1+i)*pipes[i]->hash();
