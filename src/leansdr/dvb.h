@@ -50,6 +50,7 @@ namespace leansdr {
     return new cstln_lut<256>(c, gamma1, gamma2);
   }
 
+  // EN 300 421, section 4.4.3, table 2 Punctured code, G1=0171, G2=0133
   static const int DVBS_G1 = 0171;
   static const int DVBS_G2 = 0133;
 
