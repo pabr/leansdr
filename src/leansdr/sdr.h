@@ -496,18 +496,30 @@ namespace leansdr {
 	
 	  // AGC
 	  // For APSK we must do AGC on the symbols, not the whole signal.
+	  // TODO Use a better estimator at low SNR.
 	  float insp = sg.re*sg.re + sg.im*sg.im;
 	  est_insp = insp*kest + est_insp*(1-kest);
 	  if ( est_insp )
 	    agc_gain = cstln_amp / gen_sqrt(est_insp);
 	  
 	  // SS and MER
-	  float sig_power = s.re*s.re+s.im*s.im;
+	  complex<float> ev(s.re-cstln_point->re, s.im-cstln_point->im);
+	  float sig_power, ev_power;
+	  if ( cstln->nsymbols == 2 ) {
+	    // Special case for BPSK: Ignore quadrature component of noise.
+	    float sig_real = (cstln_point->re+cstln_point->im) * 0.707;
+	    float ev_real = (ev.re+ev.im) * 0.707;
+	    sig_power = sig_real * sig_real;
+	    ev_power = ev_real * ev_real;
+	  } else {
+	    sig_power =
+	      (int)cstln_point->re*cstln_point->re +
+	      (int)cstln_point->im*cstln_point->im;
+	    ev_power = ev.re*ev.re + ev.im*ev.im;
+	  }
 	  est_sp = sig_power*kest + est_sp*(1-kest);
-	  complex<float> errvect(s.re-cstln_point->re, s.im-cstln_point->im);
-	  float errvect_power = errvect.re*errvect.re + errvect.im*errvect.im;
-	  est_ep = errvect_power*kest + est_ep*(1-kest);
-	
+	  est_ep = ev_power*kest + est_ep*(1-kest);
+
 	}
 
 	// This is best done periodically ouside the inner loop,
@@ -558,6 +570,7 @@ namespace leansdr {
     float est_insp, agc_gain;
     float mu;  // PSK time expressed in clock ticks
     u_angle phase;
+    // Signal estimation
     float est_sp;  // Estimated RMS signal power
     float est_ep;  // Estimated RMS error vector power
     unsigned long meas_count;
@@ -610,6 +623,84 @@ namespace leansdr {
     float lut_cos[65536];
     float lut_sin[65536];
     unsigned short index;  // Current phase
+  };
+
+  // SPECTRUM-BASED CNR ESTIMATOR
+  // Assumes that the spectrum is as follows:
+  //
+  //  ---|--noise---|-roll-off-|---carrier+noise----|-roll-off-|---noise--|---
+  //     |  (bw/2)  |  (bw/2)  |        (bw)        |  (bw/2)  |  (bw/2)  |
+  //
+  // Maximum roll-off 0.5
+
+  template<typename T>
+  struct cnr_fft : runnable {
+    cnr_fft(scheduler *sch, pipebuf< complex<T> > &_in, pipebuf<float> &_out,
+	    float _bandwidth, int nfft=4096)
+      : runnable(sch, "cnr_fft"),
+	bandwidth(_bandwidth), freq_tap(NULL), tap_multiplier(1),
+	decimation(1048576), kavg(0.1),
+	in(_in), out(_out),
+	fft(nfft), avgmag(NULL), phase(0) {
+    }
+
+    float bandwidth;
+    float *freq_tap, tap_multiplier;    
+    int decimation;
+    float kavg;
+
+    void run() {
+      while ( in.readable()>=fft.n && out.writable()>=1 ) {
+	if ( ! phase ) do_cnr();
+	in.read(fft.n);
+	phase += fft.n;
+	if ( phase >= decimation ) phase = 0;
+      }
+    }
+    
+  private:
+
+    void do_cnr() {
+      float center_freq = freq_tap ? *freq_tap * tap_multiplier : 0;
+      int icf = floor(center_freq*fft.n+0.5);
+      complex<T> data[fft.n];
+      memcpy(data, in.rd(), fft.n*sizeof(data[0]));
+      fft.inplace(data, true);
+      T mag[fft.n];
+      for ( int i=0; i<fft.n; ++i )
+	mag[i] = data[i].re*data[i].re + data[i].im*data[i].im;
+      if ( ! avgmag ) {
+	avgmag = new T[fft.n];
+	memcpy(avgmag, mag, fft.n*sizeof(avgmag[0]));
+      }
+      for ( int i=0; i<fft.n; ++i )
+	avgmag[i] = avgmag[i]*(1-kavg) + mag[i]*kavg;
+      
+      int bwslots = (bandwidth/2) * fft.n;
+      if ( ! bwslots ) return;
+      // Measure carrier+noise in center band
+      float c2plusn2 = sumslots(icf-bwslots, icf+bwslots);
+      // Measure noise left and right of roll-off zones
+      float n2 = ( sumslots(icf-bwslots*3, icf-bwslots*2) +
+		   sumslots(icf+bwslots*2, icf+bwslots*3) ) / 2;
+      float c2 = c2plusn2 - n2;
+      float cnr = (c2>0 && n2>0) ? 10 * logf(c2/n2)/logf(10) : -50;
+      *out.wr() = cnr;
+      out.written(1);
+    }
+
+    T *avgdata;
+    float sumslots(int i0, int i1) {  // i0 <= i1
+      T s = 0;
+      for ( int i=i0; i<=i1; ++i ) s += avgmag[i&(fft.n-1)];
+      return s / (i1-i0+1);
+    }
+    
+    pipereader< complex<T> > in;
+    pipewriter< float > out;
+    cfft_engine<T> fft;
+    T *avgmag;
+    int phase;
   };
   
 }  // namespace
