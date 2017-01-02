@@ -15,6 +15,7 @@
 #include "leansdr/dvb.h"
 #include "leansdr/rs.h"
 #include "leansdr/gui.h"
+#include "leansdr/filtergen.h"
 
 using namespace leansdr;
 
@@ -28,6 +29,8 @@ struct config {
   float Fs;          // Sampling frequency (Hz) 
   float Fderot;      // Shift the signal (Hz). Note: Ftune is faster
   int anf;           // Number of auto notch filters
+  bool cnr;            // Measure CNR
+  unsigned int decim;  // Decimation, 0=auto
   int fd_pp;         // FD for preprocessed data, or -1
   float awgn;        // Standard deviation of noise
 
@@ -38,7 +41,10 @@ struct config {
   float Ftune;       // Bias frequency for the QPSK demodulator (Hz)
   bool allow_drift;
   bool fastlock;
-  bool filter;
+  bool resample;
+  float resample_rej;  // Approx. filter rejection in dB
+  bool rrc;            // Apply root raised-cosine filter
+  float rolloff;       // Roll-off 0..1
 
   bool gui;          // Plot stuff
   float duration;    // Horizontal span of timeline GUI (s)
@@ -55,6 +61,8 @@ struct config {
       Fs(2.4e6),
       Fderot(0),
       anf(1),
+      cnr(false),
+      decim(0),
       fd_pp(-1),
       awgn(0),
       Fm(2e6),
@@ -64,7 +72,11 @@ struct config {
       Ftune(0),
       allow_drift(false),
       fastlock(false),
-      filter(false),
+      resample(false),
+      resample_rej(10),
+      rrc(false),
+      rolloff(0.35),
+
       gui(false),
       duration(60),
       linger(false),
@@ -201,20 +213,91 @@ int run(config &cfg) {
     p_preprocessed = p_derot;
   }
 
-  if ( cfg.filter ) {
-    // LOW-PASS FILTERING
+  // CNR ESTIMATION
 
-    int decim = cfg.Fs / cfg.Fm / 2;
-    if ( decim > 1 ) {
-      if ( cfg.verbose )
-	fprintf(stderr, "Inserting filter %d\n", decim);
-      pipebuf<cf32> *p_lowpass =
-	new pipebuf<cf32>(&sch, "lowpass", BUF_BASEBAND);
-      naive_lowpass<cf32> *r_lowpass =
-	new naive_lowpass<cf32>(&sch, *p_preprocessed, *p_lowpass, decim);
-      p_preprocessed = p_lowpass;
-    }
+  pipebuf<f32> p_cnr(&sch, "cnr", BUF_SLOW);
+  cnr_fft<f32> *r_cnr = NULL;
+  if ( cfg.cnr ) {
+    if ( cfg.verbose )
+      fprintf(stderr, "Measuring CNR\n");
+    r_cnr = new cnr_fft<f32>(&sch, *p_preprocessed, p_cnr, cfg.Fm/cfg.Fs);
+    r_cnr->decimation = 128*1024;  // Same as demod.decimation
   }
+
+  // FILTERING
+
+  if ( cfg.verbose ) fprintf(stderr, "Roll-off %g\n", cfg.rolloff);
+
+  fir_filter<cf32,float> *r_resample = NULL;
+  fir_filter<cf32,float> *r_rrc = NULL;
+      
+  int decim = 1;
+
+  if ( cfg.resample ) {
+    // Lowpass-filter and decimate.
+    if ( cfg.decim )
+      decim = cfg.decim;
+    else {
+      // Decimate to just above 4 samples per symbol
+      float target_Fs = cfg.Fm * 4;
+      decim = cfg.Fs / target_Fs;
+      if ( decim < 1 ) decim = 1;
+    }
+    float transition = (cfg.Fm/2) * cfg.rolloff;
+    int order = cfg.resample_rej * cfg.Fs / (22*transition);
+    order = ((order+1)/2) * 2;  // Make even
+    if ( cfg.verbose )
+      fprintf(stderr, "Inserting filter: order %d, decimation %d.\n",
+	      order, decim);
+    pipebuf<cf32> *p_resampled =
+      new pipebuf<cf32>(&sch, "resampled", BUF_BASEBAND);
+    float *coeffs;
+    float Fcut = (cfg.Fm/2) * (1+cfg.rolloff/2) / cfg.Fs;
+    int ncoeffs = filtergen::lowpass(order, Fcut, &coeffs);
+    if ( cfg.debug ) {
+      for ( int i=0; i<order; ++i ) fprintf(stderr, "%f, ", coeffs[i]);
+      fprintf(stderr, "\n");
+    }
+    r_resample = new fir_filter<cf32,float>
+      (&sch, ncoeffs, coeffs, *p_preprocessed, *p_resampled, decim);
+    p_preprocessed = p_resampled;
+    cfg.Fs /= decim;
+  }
+
+  if ( cfg.rrc ) {
+#if 1
+    fprintf(stderr, "RRC not implemented (ignoring).\n");
+#else
+    float *coeffs;
+    int ncoeffs = filtergen::root_raised_cosine
+      (cfg.Fm/cfg.Fs, rolloff, &coeffs);
+    if ( cfg.verbose )
+      fprintf(stderr, "Inserting RRC filter, %d coeffs.\n", ncoeffs);
+    pipebuf<cf32> *p_rrc =
+      new pipebuf<cf32>(&sch, "rrc", BUF_BASEBAND);
+    r_rrc = new fir_filter<cf32,float>
+      (&sch, ncoeffs, coeffs, *p_preprocessed, *p_rrc);
+    p_preprocessed = p_rrc;
+#endif
+  }
+
+  // DECIMATION
+  // (Unless already done in resampler)
+
+  if ( !cfg.resample && cfg.decim>1 ) {
+    decim = cfg.decim;
+    if ( cfg.verbose )
+      fprintf(stderr, "Inserting decimator 1/%u\n", decim);
+    pipebuf<cf32> *p_decimated =
+      new pipebuf<cf32>(&sch, "decimated", BUF_BASEBAND);
+    decimator<cf32> *p_decim =
+      new decimator<cf32>(&sch, decim, *p_preprocessed, *p_decimated);
+    p_preprocessed = p_decimated;
+    cfg.Fs /= decim;
+  }
+
+  if ( cfg.verbose )
+    fprintf(stderr, "Fs after resampling/decimation: %f Hz\n", cfg.Fs);
 
 #ifdef GUI
   if ( cfg.gui ) {
@@ -224,6 +307,7 @@ int run(config &cfg) {
       new spectrumscope<f32>(&sch, *p_preprocessed, amp,
 			     "preprocessed (spectrum)");
     r_fft_pp->amax *= 0.25;
+    r_fft_pp->decimation /= decim;
   }
 #endif
 
@@ -260,14 +344,36 @@ int run(config &cfg) {
       fprintf(stderr, "Biasing receiver to %.3f kHz\n", cfg.Ftune/1e3);
     demod.set_freq(cfg.Ftune/cfg.Fs);
   }
-  if ( cfg.allow_drift )
+  if ( cfg.allow_drift ) {
+    if ( cfg.verbose )
+      fprintf(stderr, "Allowing unlimited drift.\n");
     demod.set_allow_drift(true);
+  } else {
+    if ( cfg.verbose )
+      fprintf(stderr, "Frequency offset limits: %+.0f..%+.0f Hz.\n",
+	      demod.min_freqw*cfg.Fs/65536,
+	      demod.max_freqw*cfg.Fs/65536);
+  }
   demod.meas_decimation = 128*1024;
+  demod.meas_decimation /= decim;
 
-  if ( cfg.verbose )
-    fprintf(stderr, "Frequency offset limits: %+.0f..%+.0f Hz.\n",
-	    (s_angle)demod.min_freqw*cfg.Fs/65536,
-	    (s_angle)demod.max_freqw*cfg.Fs/65536);
+  // TRACKING FILTERS
+
+  if ( r_resample ) {
+    r_resample->freq_tap = &demod.freq_tap;
+    r_resample->tap_multiplier = 1.0 / decim;
+    r_resample->freq_tol = cfg.Fm/(cfg.Fs*decim) * 0.1;
+  }
+
+  if ( r_rrc ) {
+    r_rrc->freq_tap = &demod.freq_tap;
+    r_rrc->freq_tol = cfg.Fm/cfg.Fs * 0.1;
+  }
+
+  if ( r_cnr ) {
+    r_cnr->freq_tap = &demod.freq_tap;
+    r_cnr->tap_multiplier = 1.0 / decim;
+  }
 
 #ifdef GUI
   if ( cfg.gui ) {
@@ -325,6 +431,7 @@ int run(config &cfg) {
     new file_printer<f32>(&sch, "SS %f\n", p_ss, cfg.fd_info);
     new file_printer<f32>(&sch, "MER %.1f\n", p_mer, cfg.fd_info);
     new file_printer<int>(&sch, "LOCK %d\n", p_lock, cfg.fd_info);
+    new file_printer<f32>(&sch, "CNR %.1f\n", p_cnr, cfg.fd_info);
     // Output constants immediately
     FILE *f = fdopen(cfg.fd_info, "w");
     static const char *fec_names[] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
@@ -357,16 +464,21 @@ int run(config &cfg) {
   float max_packets_per_pixel = max_packet_rate / pixel_rate;
 
   slowmultiscope<f32>::chanspec chans[] = {
-    { &p_freq, "estimated frequency", "%3.1f kHz", {0,255,255},
+    { &p_freq, "estimated frequency", "%3.3f kHz", {0,255,255},
       cfg.Fs*1e-3f,
-      (cfg.Ftune-cfg.Fs/4)*1e-3f, (cfg.Ftune+cfg.Fs/4)*1e-3f,
-      slowmultiscope<f32>::chanspec::DEFAULT },
+      (cfg.Ftune-cfg.Fm/2)*1e-3f, (cfg.Ftune+cfg.Fm/2)*1e-3f,
+      slowmultiscope<f32>::chanspec::WRAP },
     { &p_ss, "signal strength", "%3.0f", {255,0,0},
       1, 0,128, 
       slowmultiscope<f32>::chanspec::DEFAULT },
     { &p_mer, "MER", "%5.1f dB", {255,0,255},
-      1, -30,30, 
+      1, -10,20, 
       slowmultiscope<f32>::chanspec::DEFAULT },
+    { &p_cnr, "CNR", "%5.1f dB", {255,255,0},
+      1, -10,20, 
+      (r_cnr?
+       slowmultiscope<f32>::chanspec::DEFAULT:
+       slowmultiscope<f32>::chanspec::DISABLED) },
     { &p_tscount, "TS recovery", "%3.0f %%", {255,255,0},
       110/max_packets_per_pixel, 0, 101,
       (slowmultiscope<f32>::chanspec::flag)
@@ -393,6 +505,8 @@ int run(config &cfg) {
     
   sch.run();
 
+  sch.shutdown();
+
   if ( cfg.verbose ) sch.dump();
   
   if ( cfg.gui && cfg.linger ) while ( 1 ) { sch.run(); usleep(10000); }
@@ -415,6 +529,7 @@ void usage(const char *name, FILE *f, int c) {
 	  "\nPreprocessing options:\n"
 	  "  --anf N        Number of birdies to remove (default: 1)\n"
 	  "  --derotate HZ  For use with --fd-pp, otherwise use --tune\n"
+	  "  --cnr          Measure CNR (CPU-intensive)\n"
 	  "  --fd-pp NUM    Dump preprocessed IQ data to file descriptor\n"
 	  );
   fprintf(f,
@@ -426,7 +541,10 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --const C      QPSK (default), 8PSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
 	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
-	  "  --filter       Filter baseband (CPU-intensive)\n"
+	  "  --resample     Resample baseband (CPU-intensive)\n"
+	  "  --resample-rej K  Aliasing rejection\n"
+	  "  --decim N      Decimate baseband (with aliasing)\n"
+	  "  --rrc          Apply root raised cosine filter (CPU-intensive)\n"
 	  "  --hq           Enable all CPU-intensive features\n"
 	  );
   fprintf(f,
@@ -456,7 +574,7 @@ int main(int argc, const char *argv[]) {
   for ( int i=1; i<argc; ++i ) {
     if      ( ! strcmp(argv[i], "-h") )
       usage(argv[0], stdout, 0);
-    if      ( ! strcmp(argv[i], "-v") )
+    else if ( ! strcmp(argv[i], "-v") )
       cfg.verbose = true;
     else if ( ! strcmp(argv[i], "-d") )
       cfg.debug = true;
@@ -502,14 +620,30 @@ int main(int argc, const char *argv[]) {
     }
     else if ( ! strcmp(argv[i], "--fastlock") )
       cfg.fastlock = true;
-    else if ( ! strcmp(argv[i], "--filter") )
-      cfg.filter = true;
+    else if ( ! strcmp(argv[i], "--filter") ) {
+      fprintf(stderr, "--filter is obsolete; use --resample.\n");
+      cfg.resample = true;
+    }
+    else if ( ! strcmp(argv[i], "--resample") )
+      cfg.resample = true;
+    else if ( ! strcmp(argv[i], "--resample-rej") && i+1<argc )
+      cfg.resample_rej = atof(argv[++i]);
+    else if ( ! strcmp(argv[i], "--decim") && i+1<argc )
+      cfg.decim = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--rrc") )
+      cfg.rrc = true;
+    else if ( ! strcmp(argv[i], "--roll-off") && i+1<argc )
+      cfg.rolloff = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--hq") ) {
       cfg.fastlock = true;
-      cfg.filter = true;
+      cfg.resample = true;
+      cfg.rrc = true;
+      cfg.cnr = true;
     }
     else if ( ! strcmp(argv[i], "--anf") && i+1<argc )
       cfg.anf = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--cnr") )
+      cfg.cnr = true;
     else if ( ! strcmp(argv[i], "--tune") && i+1<argc )
       cfg.Ftune = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--drift") )
