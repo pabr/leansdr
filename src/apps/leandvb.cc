@@ -1,4 +1,4 @@
-// leandvb.cc copyright (c) 2016 pabr@pabr.org
+// leandvb.cc copyright (c) 2016-2017 pabr@pabr.org
 // http://www.pabr.org/radio/leandvb
 
 #include <stdio.h>
@@ -41,6 +41,8 @@ struct config {
   float Ftune;       // Bias frequency for the QPSK demodulator (Hz)
   bool allow_drift;
   bool fastlock;
+  bool viterbi;
+  bool hard_metric;
   bool resample;
   float resample_rej;  // Approx. filter rejection in dB
   bool rrc;            // Apply root raised-cosine filter
@@ -72,6 +74,8 @@ struct config {
       Ftune(0),
       allow_drift(false),
       fastlock(false),
+      viterbi(false),
+      hard_metric(false),
       resample(false),
       resample_rej(10),
       rrc(false),
@@ -331,6 +335,11 @@ int run(config &cfg) {
   cstln_receiver<f32> demod(&sch, *p_preprocessed, p_symbols,
 			    &p_freq, &p_ss, &p_mer, &p_sampled);
   cstln_lut<256> qpsk(cstln_lut<256>::QPSK);
+  if ( cfg.hard_metric ) {
+    if ( cfg.verbose )
+      fprintf(stderr, "Using hard metric.\n");
+    qpsk.harden();
+  }
   demod.cstln = &qpsk;
   if ( cfg.standard == config::DVB_S2 ) {
     // For DVB-S2 testing only.
@@ -350,9 +359,9 @@ int run(config &cfg) {
     demod.set_allow_drift(true);
   } else {
     if ( cfg.verbose )
-      fprintf(stderr, "Frequency offset limits: %+.0f..%+.0f Hz.\n",
-	      demod.min_freqw*cfg.Fs/65536,
-	      demod.max_freqw*cfg.Fs/65536);
+      fprintf(stderr, "Frequency offset limits: %+.3f..%+.3f kHz.\n",
+	      demod.min_freqw*cfg.Fs/65536/1000,
+	      demod.max_freqw*cfg.Fs/65536/1000);
   }
   demod.meas_decimation = 128*1024;
   demod.meas_decimation /= decim;
@@ -395,12 +404,20 @@ int run(config &cfg) {
   pipebuf<u8> p_bytes(&sch, "bytes", BUF_BYTES);
   pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
 
-  deconvol_sync_simple r_deconv =
-    make_deconvol_sync_simple(&sch, p_symbols, p_bytes, cfg.fec);
-  r_deconv.fastlock = cfg.fastlock;
+  deconvol_sync_simple *r_deconv = NULL;
+
+  if ( cfg.viterbi ) {
+    if ( cfg.fec != FEC12 )
+      fail("Viterbi only for code rate 1/2");
+    viterbi_sync *r_viterbi = new viterbi_sync(&sch, p_symbols, p_bytes);
+    if ( cfg.fastlock ) r_viterbi->sync_decimation = 1;
+  } else {
+    r_deconv = make_deconvol_sync_simple(&sch, p_symbols, p_bytes, cfg.fec);
+    r_deconv->fastlock = cfg.fastlock;
+  }
 
   pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
-  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, &r_deconv, &p_lock);
+  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, r_deconv, &p_lock);
   r_sync.fastlock = cfg.fastlock;
 
   // DEINTERLEAVING
@@ -541,6 +558,7 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --const C      QPSK (default), 8PSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
 	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
+	  "  --viterbi      Use Viterbi (CPU-intensive)\n"
 	  "  --resample     Resample baseband (CPU-intensive)\n"
 	  "  --resample-rej K  Aliasing rejection\n"
 	  "  --decim N      Decimate baseband (with aliasing)\n"
@@ -620,6 +638,10 @@ int main(int argc, const char *argv[]) {
     }
     else if ( ! strcmp(argv[i], "--fastlock") )
       cfg.fastlock = true;
+    else if ( ! strcmp(argv[i], "--viterbi") )
+      cfg.viterbi = true;
+    else if ( ! strcmp(argv[i], "--hard-metric") )
+      cfg.hard_metric = true;
     else if ( ! strcmp(argv[i], "--filter") ) {
       fprintf(stderr, "--filter is obsolete; use --resample.\n");
       cfg.resample = true;
@@ -636,6 +658,7 @@ int main(int argc, const char *argv[]) {
       cfg.rolloff = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--hq") ) {
       cfg.fastlock = true;
+      cfg.viterbi = true;
       cfg.resample = true;
       cfg.rrc = true;
       cfg.cnr = true;

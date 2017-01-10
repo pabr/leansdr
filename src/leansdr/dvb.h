@@ -1,6 +1,8 @@
 #ifndef LEANSDR_DVB_H
 #define LEANSDR_DVB_H
 
+#include "leansdr/viterbi.h"
+
 namespace leansdr {
 
   static const int SIZE_RSPACKET = 204;
@@ -487,10 +489,10 @@ namespace leansdr {
 
   typedef deconvol_sync<u8,0> deconvol_sync_simple;
 
-  deconvol_sync_simple make_deconvol_sync_simple(scheduler *sch,
-					  pipebuf<softsymbol> &_in,
-					  pipebuf<u8> &_out,
-					  enum code_rate rate) {
+  deconvol_sync_simple *make_deconvol_sync_simple(scheduler *sch,
+						  pipebuf<softsymbol> &_in,
+						  pipebuf<u8> &_out,
+						  enum code_rate rate) {
     // EN 300 421, section 4.4.3 Inner coding
     unsigned long pX, pY;
     switch ( rate ) {
@@ -520,7 +522,7 @@ namespace leansdr {
       fprintf(stderr, "Code rate not implemented; proceeding anyway\n");
       pX = pY = 1;
     }
-    return deconvol_sync_simple(sch, _in, _out, DVBS_G1, DVBS_G2, pX, pY);
+    return new deconvol_sync_simple(sch, _in, _out, DVBS_G1, DVBS_G2, pX, pY);
   }
 
   template<typename Tbyte, Tbyte BYTE_ERASED>
@@ -583,7 +585,7 @@ namespace leansdr {
 	if ( next_sync_count >= 3 ) {
 	  // After a few cycles without a lock, resync the deconvolver.
 	  next_sync_count = 0;
-	  deconv->next_sync();
+	  if ( deconv ) deconv->next_sync();
 	}
       }
     }
@@ -781,6 +783,114 @@ namespace leansdr {
     u8 pattern[188*8], *pattern_end, *pos;
     pipereader<tspacket> in;
     pipewriter<tspacket> out;
+  };
+
+  // VITERBI DECODING
+  // QPSK 1/2 only.
+
+  struct viterbi_sync : runnable {
+    static const int TRACEBACK = 32;  // Suitable for QPSK 1/2
+    typedef unsigned char TS, TCS, TUS;
+    typedef unsigned short TBM;
+    typedef unsigned long TPM;
+    typedef bitpath<unsigned long,TUS,1,TRACEBACK> dvb_path;
+    typedef viterbi_dec<TS,64, TUS,2, TCS,4, TBM, TPM, dvb_path> dvb_dec;
+    typedef trellis<TS,64, TUS,2, 4> dvb_trellis;
+
+  private:
+    pipereader<softsymbol> in;
+    pipewriter<unsigned char> out;
+    static const int NSYNCS = 4;
+    dvb_dec *syncs[NSYNCS];
+    int current_sync;
+    static const int chunk_size = 128;
+    int sync_phase;
+  public:
+    int sync_decimation;
+
+    viterbi_sync(scheduler *sch,
+		 pipebuf<softsymbol> &_in,
+		 pipebuf<unsigned char> &_out)
+      : runnable(sch, "viterbi_sync"),
+	in(_in), out(_out, chunk_size),
+	current_sync(0),
+	sync_phase(0),
+	sync_decimation(32)   // 1/32 = 9% synchronization overhead
+    {
+      dvb_trellis *trell = new dvb_trellis();
+      unsigned long long dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
+      trell->init_convolutional(dvb_polynomials);
+      for ( int s=0; s<NSYNCS; ++s ) syncs[s] = new dvb_dec(trell);
+    }
+
+    inline TUS update_sync(int s, TBM m[4], TPM *discr) {
+      // EN 300 421, section 4.5 Baseband shaping and modulation
+      // EN 302 307, section 5.4.1
+      //              
+      //    IQ=10=(2) | IQ=00=(0)
+      //    ----------+----------
+      //    IQ=11=(3) | IQ=01=(1)
+      //
+      TBM vm[4];
+      switch ( s ) {
+      case 0:  // Mapping for 0°
+	vm[0]=m[0]; vm[1]=m[1]; vm[2]=m[2]; vm[3]=m[3]; break;
+      case 1:  // Mapping for 90°
+	vm[0]=m[2]; vm[2]=m[3]; vm[3]=m[1]; vm[1]=m[0]; break;
+      case 2:  // Mapping for 0° conjugated
+	vm[0]=m[1]; vm[1]=m[0]; vm[2]=m[3]; vm[3]=m[0]; break;
+      case 3:  // Mapping for 90° conjugated
+	vm[0]=m[3]; vm[2]=m[2]; vm[3]=m[0]; vm[1]=m[1]; break;
+      default:
+	return 0;  // Avoid compiler warning
+      }
+      return syncs[s]->update(vm, discr);
+    }
+
+    void run() {
+      while ( in.readable()>=8*chunk_size && out.writable()>=chunk_size ) {
+	unsigned long totaldiscr[NSYNCS];
+	for ( int s=0; s<NSYNCS; ++s ) totaldiscr[s] = 0;
+	for ( int bytenum=0; bytenum<chunk_size; ++bytenum ) {
+	  // Decode one byte
+	  unsigned char byte = 0;
+	  softsymbol *pin = in.rd();
+	  if ( ! sync_phase ) {
+	    // Every one in [sync_decimation] chunks, run all decoders
+	    for ( int b=0; b<8; ++b,++pin ) {
+	      TUS bits[NSYNCS];
+	      for ( int s=0; s<NSYNCS; ++s ) {
+		TPM discr;
+		bits[s] = update_sync(s, pin->metrics4, &discr);
+		if ( bytenum >= TRACEBACK ) totaldiscr[s] += discr;
+	      }
+	      byte = (byte<<1) | bits[current_sync];
+	    }
+	  } else {
+	    // Otherwise run only the selected decoder
+	    for ( int b=0; b<8; ++b,++pin ) {
+	      TUS bit = update_sync(current_sync, pin->metrics4, NULL);
+	      byte = (byte<<1) | bit;
+	    }
+	  }
+	  *out.wr() = byte;
+	  in.read(8);
+	  out.written(1);
+	}  // chunk_size
+	if ( ! sync_phase ) {
+	  // Switch to another decoder ?
+	  int best = current_sync;
+	  for ( int s=0; s<NSYNCS; ++s )
+	    if ( totaldiscr[s] > totaldiscr[best] ) best = s;
+	  if ( best != current_sync ) {
+	    if ( sch->debug ) fprintf(stderr, "%%");
+	    current_sync = best;
+	  }
+	}
+	if ( ++sync_phase >= sync_decimation ) sync_phase = 0;
+      }
+    }
+    
   };
 
 }  // namespace

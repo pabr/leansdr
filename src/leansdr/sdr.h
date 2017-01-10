@@ -162,8 +162,8 @@ namespace leansdr {
   // Up to 256 symbols.
   
   struct softsymbol {
+    unsigned short metrics4[4];  // For Viterbi QPSK
     unsigned char symbol; // 000000IQ for QPSK
-    unsigned char metric;
   };
 
   // Target RMS amplitude for AGC
@@ -304,22 +304,44 @@ namespace leansdr {
     void make_lut_from_symbols() {
       for ( int I=-R/2; I<R/2; ++I )
 	for ( int Q=-R/2; Q<R/2; ++Q ) {
+	  result *pr = &lut[I&(R-1)][Q&(R-1)];
 	  unsigned int dmin = R*2;
 	  unsigned char smin = 0;
 	  for ( int s=0; s<nsymbols; ++s ) {
-	    unsigned int d = hypotf(I-symbols[s].re, Q-symbols[s].im);
+	    unsigned int d2 =
+	      (I-symbols[s].re)*(I-symbols[s].re) +
+	      (Q-symbols[s].im)*(Q-symbols[s].im);
+	    if ( d2 > 65535 ) fail("Unexpected constellation");
+	    unsigned int d = sqrtf(d2);
 	    if ( d < dmin ) { dmin=d; smin=s; }
+	    if ( nsymbols == 4 ) {
+	      pr->ss.metrics4[s] = d2;
+	    }
 	  }
 	  float ph_symbol = atan2f(symbols[smin].im,symbols[smin].re);
 	  float ph_err = atan2f(Q,I) - ph_symbol;
-	  result *pr = &lut[I&(R-1)][Q&(R-1)];
 	  if ( dmin > 255 ) fail("dmin overflow");
 	  pr->ss.symbol = smin;
-	  pr->ss.metric = dmin;
-	  //pr->ss.metric = 255 * (int)dmin / dmin2;
 	  pr->phase_error = ph_err * 65536 / (2*M_PI);
 	}
     }
+
+  public:
+    void harden() {
+      for ( int i=0; i<R; ++i )
+	for ( int q=0; q<R; ++q ) {
+	  unsigned short *m = lut[i][q].ss.metrics4;
+	  int best;
+	  if ( m[0]<=m[1] && m[0]<=m[2] && m[0]<=m[3] ) best = 0;
+	  else if ( m[1]<=m[2] && m[1]<=m[3] ) best = 1;
+	  else if ( m[2]<=m[3] ) best = 2;
+	  else best = 3;
+	  // TBD Try Hamming distance
+	  m[0] = m[1] = m[2] = m[3] = 1;
+	  m[best] = 0;
+	}
+    }
+
   };
   
   // CONSTELLATION RECEIVER
@@ -642,6 +664,8 @@ namespace leansdr {
 	decimation(1048576), kavg(0.1),
 	in(_in), out(_out),
 	fft(nfft), avgmag(NULL), phase(0) {
+      if ( bandwidth > 0.33 )
+	fail("CNR estimator requires Fsampling > 3x Fsignal");
     }
 
     float bandwidth;
