@@ -1,6 +1,8 @@
 #ifndef LEANSDR_RS_H
 #define LEANSDR_RS_H
 
+#include "leansdr/math.h"
+
 namespace leansdr {
 
   // Finite group GF(2^N).
@@ -102,7 +104,8 @@ namespace leansdr {
 
 #define DEBUG_RS 0
   
-    bool correct(u8 synd[16], u8 pout[188], u8 pin[204]=NULL) {
+    bool correct(u8 synd[16], u8 pout[188],
+		 u8 pin[204]=NULL, int *bits_corrected=NULL) {
       // Berlekamp - Massey
       // http://en.wikipedia.org/wiki/Berlekamp%E2%80%93Massey_algorithm#Code_sample
       u8 C[16] = { 1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 };  // Max degree is L
@@ -187,6 +190,7 @@ namespace leansdr {
 	    u8 e = gf.div(num, den);
 	    // Subtract e from coefficient of degree loc.
 	    // Note: Coeffients listed by decreasing degree in pin[] and pout[].
+	    if ( bits_corrected ) *bits_corrected += hamming_weight(e);
 	    if ( loc >= 16 ) pout[203-loc] ^= e;
 	    if ( pin ) pin[203-loc] ^= e;
 	  }
@@ -206,14 +210,25 @@ namespace leansdr {
     rs_engine rs;
     rs_decoder(scheduler *sch,
 	       pipebuf< rspacket<Tbyte> > &_in,
-	       pipebuf<tspacket> &_out)
+	       pipebuf<tspacket> &_out,
+	       pipebuf<int> *_bitcount=NULL,
+	       pipebuf<int> *_errcount=NULL)
       : runnable(sch, "RS decoder"),
 	in(_in), out(_out) {
+      bitcount = _bitcount ? new pipewriter<int>(*_bitcount) : NULL;
+      errcount = _errcount ? new pipewriter<int>(*_errcount) : NULL;
     }
     void run() {
+      if ( bitcount && bitcount->writable()<1 ) return;
+      if ( errcount && errcount->writable()<1 ) return;
+
+      int nbits=0, nerrs=0;
+
       while ( in.readable()>=1 && out.writable()>=1 ) {
 	Tbyte *pin = in.rd()->data;
 	u8 *pout = out.wr()->data;
+
+	nbits += SIZE_RSPACKET * 8;
 
 	// The message is the first 188 bytes.
 	if ( sizeof(Tbyte) == 1 )
@@ -236,8 +251,8 @@ namespace leansdr {
 	if ( ! corrupted ) {
 	  if ( sch->debug ) 
 	    fprintf(stderr, "_");  // Packet received without errors.
-	} else { 
-	  corrupted = rs.correct(synd, pout, pin);
+	} else {
+	  corrupted = rs.correct(synd, pout, pin, &nerrs);
 	  if ( sch->debug ) {
 	    if ( ! corrupted )
 	      fprintf(stderr, ".");  // Errors were corrected.
@@ -252,11 +267,17 @@ namespace leansdr {
 	// otherwise the derandomizer will lose synchronization.
 	if ( corrupted ) pout[0] ^= MPEG_SYNC_CORRUPTED;
 	out.written(1);
+
+      }
+      if ( nbits ) {
+	if ( bitcount ) { *bitcount->wr()=nbits; bitcount->written(1); }
+	if ( errcount ) { *errcount->wr()=nerrs; errcount->written(1); }
       }
     }
   private:
     pipereader< rspacket<Tbyte> > in;
     pipewriter<tspacket> out;
+    pipewriter<int> *bitcount, *errcount;
   };
 
 }  // namespace
