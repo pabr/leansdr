@@ -32,6 +32,24 @@ namespace leansdr {
   complex<T> operator *(const T &k, complex<T> &a) {
     return complex<T>(k*a.re, k*a.im);
   }
+  
+  // TBD Optimize with dedicated instructions
+  int hamming_weight(unsigned char x) {
+    static int lut[16] = { 0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4 };
+    return lut[x&15] + lut[x>>4];
+  }
+  int hamming_weight(unsigned short x) {
+    return hamming_weight((unsigned char)x)
+      +    hamming_weight((unsigned char)(x>>8));
+  }
+  int hamming_weight(unsigned long x) {
+    return hamming_weight((unsigned short)x)
+      +    hamming_weight((unsigned short)(x>>16));
+  }
+  int hamming_weight(unsigned long long x) {
+    return hamming_weight((unsigned long)x)
+      +    hamming_weight((unsigned long)(x>>32));
+  }
 
 }  // namespace
 
