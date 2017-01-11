@@ -427,8 +427,19 @@ int run(config &cfg) {
 
   // REED-SOLOMON
 
+  pipebuf<int> p_vbitcount(&sch, "Bits processed", BUF_PACKETS);
+  pipebuf<int> p_verrcount(&sch, "Bits corrected", BUF_PACKETS);
   pipebuf<tspacket> p_rtspackets(&sch, "rand TS packets", BUF_PACKETS);
-  rs_decoder<u8,0> r_rsdec(&sch, p_rspackets, p_rtspackets);
+  rs_decoder<u8,0> r_rsdec(&sch, p_rspackets, p_rtspackets,
+			   &p_vbitcount, &p_verrcount);
+
+  // BER ESTIMATION
+
+  pipebuf<float> p_vber(&sch, "VBER", BUF_SLOW);
+  rate_estimator<float> r_vber(&sch, p_verrcount, p_vbitcount, p_vber);
+  r_vber.sample_size = cfg.Fm;  // About once per second, depending on CR
+  // Require resolution better than 2E-5
+  if ( r_vber.sample_size < 50000 ) r_vber.sample_size = 50000;
 
   // DERANDOMIZATION
 
@@ -449,6 +460,7 @@ int run(config &cfg) {
     new file_printer<f32>(&sch, "MER %.1f\n", p_mer, cfg.fd_info);
     new file_printer<int>(&sch, "LOCK %d\n", p_lock, cfg.fd_info);
     new file_printer<f32>(&sch, "CNR %.1f\n", p_cnr, cfg.fd_info);
+    new file_printer<float>(&sch, "VBER %.6f\n", p_vber, cfg.fd_info);
     // Output constants immediately
     FILE *f = fdopen(cfg.fd_info, "w");
     static const char *fec_names[] = { "1/2", "2/3", "3/4", "5/6", "7/8" };

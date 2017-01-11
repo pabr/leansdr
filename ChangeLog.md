@@ -5,6 +5,7 @@ HEAD
   * Documented --fd-const.
   * Renamed --probesize (was --maxsend).
   * Added --viterbi.
+  * Added VBER (bit error rate after deconvolution, detected by RS).
 
 2016-09-16 v1.1.0
   * Support for DVB-S2 constellations (not FEC).
