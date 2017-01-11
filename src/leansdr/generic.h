@@ -178,6 +178,45 @@ private:
   pipewriter<T> out;
 };
 
+  // [rate_estimator] accumulates counts of two quantities
+  // and periodically outputs their ratio.
+
+  template<typename T>
+  struct rate_estimator : runnable {
+    int sample_size;
+
+    rate_estimator(scheduler *sch,
+		   pipebuf<int> &_num, pipebuf<int> &_den,
+		   pipebuf<float> &_rate)
+      : runnable(sch, "rate_estimator"),
+	sample_size(10000),
+	num(_num), den(_den), rate(_rate),	
+	acc_num(0), acc_den(0) {
+    }
+    
+    void run() {
+      if ( rate.writable() < 1 ) return;
+      int count = min(num.readable(), den.readable());
+      int *pnum=num.rd(), *pden=den.rd();
+      for ( int n=count; n--; ++pnum,++pden ) {
+	acc_num += *pnum;
+	acc_den += *pden;
+      }
+      num.read(count);
+      den.read(count);
+      if ( acc_den >= sample_size ) {
+	*rate.wr() = (float)acc_num / acc_den;
+	rate.written(1);
+	acc_num = acc_den = 0;
+      }
+    }
+    
+  private:
+    pipereader<int> num, den;
+    pipewriter<float> rate;
+    T acc_num, acc_den;
+  };
+
 }  // namespace
 
 #endif  // LEANSDR_GENERIC_H
