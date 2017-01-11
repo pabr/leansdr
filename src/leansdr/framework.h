@@ -38,6 +38,7 @@ namespace leansdr {
     runnable_common(const char *_name) : name(_name) { }
     virtual void run() { }
     virtual void shutdown() { }
+    ~runnable_common() { fprintf(stderr, "Destroying %s !\n", name); }
   };
   
   struct window_placement {
@@ -158,6 +159,7 @@ namespace leansdr {
     }
     unsigned long min_write;
     unsigned long total_written, total_read;
+    ~pipebuf() { fprintf(stderr, "Destroying %s !\n", name); }
   };
   
   template<typename T>
