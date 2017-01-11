@@ -558,6 +558,10 @@ void usage(const char *name, FILE *f, int c) {
 	  "\nPreprocessing options:\n"
 	  "  --anf N        Number of birdies to remove (default: 1)\n"
 	  "  --derotate HZ  For use with --fd-pp, otherwise use --tune\n"
+	  "  --resample     Resample baseband (CPU-intensive)\n"
+	  "  --resample-rej K  Aliasing rejection (default: 10)\n"
+	  "  --decim N      Decimate baseband (causes aliasing)\n"
+	  "  --roll-off A   Roll-off (default: 0.35)\n"
 	  "  --cnr          Measure CNR (CPU-intensive)\n"
 	  "  --fd-pp NUM    Dump preprocessed IQ data to file descriptor\n"
 	  );
@@ -567,14 +571,11 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --tune HZ      Bias frequency for demodulation\n"
 	  "  --drift        Track frequency drift beyond safe limits\n"
 	  "  --standard S   DVB-S (default), DVB-S2 (not implemented)\n"
-	  "  --const C      QPSK (default), 8PSK .. 32APSK (DVB-S2 only)\n"
+	  "  --const C      QPSK (default), BPSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
 	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
 	  "  --viterbi      Use Viterbi (CPU-intensive)\n"
-	  "  --resample     Resample baseband (CPU-intensive)\n"
-	  "  --resample-rej K  Aliasing rejection\n"
-	  "  --decim N      Decimate baseband (with aliasing)\n"
-	  "  --rrc          Apply root raised cosine filter (CPU-intensive)\n"
+	  "  --hard-metric  Use Hamming distances with Viterbi\n"
 	  "  --hq           Enable all CPU-intensive features\n"
 	  );
   fprintf(f,
