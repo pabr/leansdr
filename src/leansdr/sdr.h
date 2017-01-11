@@ -1,6 +1,8 @@
 #ifndef LEANSDR_SDR_H
 #define LEANSDR_SDR_H
 
+#include "leansdr/math.h"
+
 namespace leansdr {
 
   //////////////////////////////////////////////////////////////////////
@@ -327,6 +329,7 @@ namespace leansdr {
     }
 
   public:
+    // Convert soft metric to Hamming distance
     void harden() {
       for ( int i=0; i<R; ++i )
 	for ( int q=0; q<R; ++q ) {
@@ -336,9 +339,8 @@ namespace leansdr {
 	  else if ( m[1]<=m[2] && m[1]<=m[3] ) best = 1;
 	  else if ( m[2]<=m[3] ) best = 2;
 	  else best = 3;
-	  // TBD Try Hamming distance
-	  m[0] = m[1] = m[2] = m[3] = 1;
-	  m[best] = 0;
+	  for ( int s=0; s<4; ++s )
+	    m[s] = hamming_weight((unsigned long)(s^best));
 	}
     }
 
