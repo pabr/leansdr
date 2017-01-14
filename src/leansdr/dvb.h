@@ -838,7 +838,7 @@ namespace leansdr {
       case 1:  // Mapping for 90°
 	vm[0]=m[2]; vm[2]=m[3]; vm[3]=m[1]; vm[1]=m[0]; break;
       case 2:  // Mapping for 0° conjugated
-	vm[0]=m[1]; vm[1]=m[0]; vm[2]=m[3]; vm[3]=m[0]; break;
+	vm[0]=m[1]; vm[1]=m[0]; vm[2]=m[3]; vm[3]=m[2]; break;
       case 3:  // Mapping for 90° conjugated
 	vm[0]=m[3]; vm[2]=m[2]; vm[3]=m[0]; vm[1]=m[1]; break;
       default:
