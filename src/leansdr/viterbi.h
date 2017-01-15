@@ -33,12 +33,6 @@ namespace leansdr {
 	for ( int cs=0; cs<NCS; ++cs )
 	  states[s].branches[cs].pred = NOSTATE;
     }
-    
-    static int parity(unsigned long long x) {
-      int p = 0;
-      for ( ; x; x>>=1 ) p ^= x;
-      return p & 1;
-    }
 
     void init_convolutional(unsigned long long G[]) {
       if ( NCS & (NCS-1) )  {
