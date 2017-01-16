@@ -502,7 +502,7 @@ namespace leansdr {
 	      deconvol_sync<Tbyte,0> *_deconv,
 	      pipebuf<int> *_state_out=NULL)
       : runnable(sch, "sync_detect"),
-	scan_syncs(4), want_syncs(2),
+	scan_syncs(8), want_syncs(4),
 	lock_timeout(4),
 	fastlock(false),
 	resync_period(1),
