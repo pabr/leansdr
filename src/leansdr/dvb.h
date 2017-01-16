@@ -114,46 +114,15 @@ namespace leansdr {
       for ( int i=0; i<2; ++i ) {
 	int nbits = log2(punct[i]) + 1;
 	if ( nbits > punctperiod ) punctperiod = nbits;
-	punctweight += hamming(punct[i]);
+	punctweight += hamming_weight(punct[i]);
       }
       if ( sch->verbose ) 
 	fprintf(stderr, "puncturing %d/%d\n", punctperiod, punctweight);
       deconv = new iq_t[punctperiod];
       deconv2 = new iq_t[punctperiod];
-      init_parity();
       inverse_convolution();
       init_syncs();
       locked = &syncs[0];
-    }
-
-    unsigned char hamming(unsigned long x) {
-      int h = 0;
-      for ( ; x; x>>=1 ) h += x&1;
-      return h;
-    }
-    inline unsigned char parity(unsigned char x) {
-      // TODO Optimize with assembly on x86
-      return lut_parity[x];
-    }
-    inline unsigned char parity(unsigned long x) {
-      unsigned char p;
-      p  = lut_parity[(unsigned char) x     ];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      return p;
-    }
-    inline unsigned char parity(unsigned long long x) {
-      unsigned char p;
-      p  = lut_parity[(unsigned char) x     ];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      p ^= lut_parity[(unsigned char)(x>>=8)];
-      return p;
     }
 
     typedef unsigned long long signal_t;
@@ -199,15 +168,6 @@ namespace leansdr {
 
   private:
 
-    unsigned char lut_parity[256];
-    void init_parity() {
-      for ( int i=0; i<256; ++i ) {
-	unsigned char p = 0;
-	for ( int x=i; x; x>>=1 ) p ^= x&1;
-	lut_parity[i] = p;
-      }
-    }
-
     static const int maxsbits = 64;
     iq_t response[maxsbits];
 
@@ -232,6 +192,8 @@ namespace leansdr {
       solve_rec(prefix|((iq_t)1<<nprefix), nprefix+1, exp, best);
     }
 
+    static const int LATENCY = 0;
+
     void inverse_convolution() {
       for ( int sbit=0; sbit<maxsbits; ++sbit ) {
 	response[sbit] = convolve((iq_t)1<<sbit);
@@ -239,7 +201,7 @@ namespace leansdr {
       }
       for ( int b=0; b<punctperiod; ++b ) {
 	deconv[b] = -(iq_t)1;
-	solve_rec(0, 0, 1<<b, &deconv[b]);
+	solve_rec(0, 0, 1<<(LATENCY+b), &deconv[b]);
       }
       
       // Alternate polynomials for fastlock
@@ -277,13 +239,13 @@ namespace leansdr {
       if ( sch->debug ) {
 	for ( int b=0; b<punctperiod; ++b )
 	  fprintf(stderr, "deconv[%d]=0x%016llx %d taps / %d bits\n",
-		  b, deconv[b], hamming(deconv[b]), log2(deconv[b])+1);
+		  b, deconv[b], hamming_weight(deconv[b]), log2(deconv[b])+1);
       }
 
       // Sanity check
       for ( int b=0; b<punctperiod; ++b ) {
 	for ( int i=0; i<maxsbits; ++i ) {
-	  iq_t iq = convolve((iq_t)1<<i);
+	  iq_t iq = convolve((iq_t)1<<(LATENCY+i));
 	  unsigned long expect = (b==i) ? 1 : 0;
 	  unsigned long d = parity(iq&deconv[b]);
 	  if ( d != expect )
@@ -525,11 +487,14 @@ namespace leansdr {
     return new deconvol_sync_simple(sch, _in, _out, DVBS_G1, DVBS_G2, pX, pY);
   }
 
+  // BIT ALIGNMENT AND MPEG SYNC DETECTION
+
   template<typename Tbyte, Tbyte BYTE_ERASED>
   struct mpeg_sync : runnable {
     int scan_syncs, want_syncs;
     unsigned long lock_timeout;
     bool fastlock;
+    int resync_period;
 
     mpeg_sync(scheduler *sch,
 	      pipebuf<Tbyte> &_in,
@@ -540,9 +505,11 @@ namespace leansdr {
 	scan_syncs(4), want_syncs(2),
 	lock_timeout(4),
 	fastlock(false),
+	resync_period(1),
 	in(_in), out(_out, SIZE_RSPACKET*(scan_syncs+1)),
 	deconv(_deconv),
 	polarity(0),
+	resync_phase(0),
 	bitphase(0), synchronized(false),
 	next_sync_count(0),
 	report_state(true) {
@@ -595,11 +562,14 @@ namespace leansdr {
       while ( in.readable() >= chunk+1 &&  // Need 1 ahead for bit shifting
 	      out.writable() >= chunk &&  // Use as temp buffer
 	      ( !state_out || state_out->writable()>=1 ) ) {
-	// Try all bit alighments
-	for ( bitphase=0; bitphase<=7; ++bitphase ) {
-	  if ( search_sync() ) return;
+	if ( resync_phase == 0 ) {
+	  // Try all bit alighments
+	  for ( bitphase=0; bitphase<=7; ++bitphase ) {
+	    if ( search_sync() ) return;
+	  }
 	}
 	in.read(SIZE_RSPACKET);
+	if ( ++resync_phase >= resync_period ) resync_phase = 0;
       }
     }
 
@@ -684,7 +654,8 @@ namespace leansdr {
     pipereader<Tbyte> in;
     pipewriter<Tbyte> out;
     deconvol_sync<Tbyte,0> *deconv;
-    unsigned char polarity;
+    unsigned char polarity;  // XOR mask, 0 or 0xff
+    int resync_phase;
     int bitphase;
     bool synchronized;
     int next_sync_count;
@@ -729,7 +700,8 @@ namespace leansdr {
   // DERANDOMIZATION
 
   struct derandomizer : runnable {
-    derandomizer(scheduler *sch, pipebuf<tspacket> &_in, pipebuf<tspacket> &_out)
+    derandomizer(scheduler *sch,
+		 pipebuf<tspacket> &_in, pipebuf<tspacket> &_out)
       : runnable(sch, "derandomizer"),
 	in(_in), out(_out) {
       precompute_pattern();
@@ -785,6 +757,7 @@ namespace leansdr {
     pipewriter<tspacket> out;
   };
 
+
   // VITERBI DECODING
   // QPSK 1/2 only.
 
@@ -804,9 +777,9 @@ namespace leansdr {
     dvb_dec *syncs[NSYNCS];
     int current_sync;
     static const int chunk_size = 128;
-    int sync_phase;
+    int resync_phase;
   public:
-    int sync_decimation;
+    int resync_period;
 
     viterbi_sync(scheduler *sch,
 		 pipebuf<softsymbol> &_in,
@@ -814,8 +787,8 @@ namespace leansdr {
       : runnable(sch, "viterbi_sync"),
 	in(_in), out(_out, chunk_size),
 	current_sync(0),
-	sync_phase(0),
-	sync_decimation(32)   // 1/32 = 9% synchronization overhead
+	resync_phase(0),
+	resync_period(32)   // 1/32 = 9% synchronization overhead
     {
       dvb_trellis *trell = new dvb_trellis();
       unsigned long long dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
@@ -855,8 +828,9 @@ namespace leansdr {
 	  // Decode one byte
 	  unsigned char byte = 0;
 	  softsymbol *pin = in.rd();
-	  if ( ! sync_phase ) {
-	    // Every one in [sync_decimation] chunks, run all decoders
+	  if ( ! resync_phase ) {
+	    // Every one in [resync_period] chunks, run all decoders
+	    // and compute averate quality metrics
 	    for ( int b=0; b<8; ++b,++pin ) {
 	      TUS bits[NSYNCS];
 	      for ( int s=0; s<NSYNCS; ++s ) {
@@ -877,17 +851,17 @@ namespace leansdr {
 	  in.read(8);
 	  out.written(1);
 	}  // chunk_size
-	if ( ! sync_phase ) {
+	if ( ! resync_phase ) {
 	  // Switch to another decoder ?
 	  int best = current_sync;
 	  for ( int s=0; s<NSYNCS; ++s )
 	    if ( totaldiscr[s] > totaldiscr[best] ) best = s;
 	  if ( best != current_sync ) {
-	    if ( sch->debug ) fprintf(stderr, "%%");
+	    if ( sch->debug ) fprintf(stderr, "%%%d", best);
 	    current_sync = best;
 	  }
 	}
-	if ( ++sync_phase >= sync_decimation ) sync_phase = 0;
+	if ( ++resync_phase >= resync_period ) resync_phase = 0;
       }
     }
     
