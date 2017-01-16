@@ -18,7 +18,13 @@ namespace leansdr {
   typedef complex<f32> iqsymbol;
   typedef complex<u8> cu8;
   typedef complex<s8> cs8;
-  
+
+
+  // AUTO-NOTCH FILTER
+
+  // Periodically detects the [nslots] strongest peaks with a FFT,
+  // removes them with a first-order filter.
+
   template<typename T>
   struct auto_notch : runnable {
     int decimation;
@@ -125,7 +131,12 @@ namespace leansdr {
     float gain;
     T agc_rms_setpoint;
   };
-  
+
+
+  // SIGNAL STRENGTH ESTIMATOR
+
+  // Outputs RMS values.
+
   template<typename T>
   struct ss_estimator : runnable {
     unsigned long window_size;  // Samples per estimation
@@ -159,7 +170,10 @@ namespace leansdr {
   typedef unsigned short u_angle;  //  [0,2PI[ in 65536 steps
   typedef signed short s_angle;  // [-PI,PI[ in 65536 steps
 
+
   // GENERIC CONSTELLATION DECODING BY LOOK-UP TABLE.
+
+  // Metrics and phase errors are pre-computed on a RxR grid.
   // R must be a power of 2.
   // Up to 256 symbols.
   
@@ -345,9 +359,13 @@ namespace leansdr {
     }
 
   };
+
   
   // CONSTELLATION RECEIVER
-  
+
+  // Linear interpolation: good enough for 1.2 samples/symbol,
+  // but higher oversampling is recommended.
+
   template<typename T>
   struct cstln_receiver : runnable {
     cstln_lut<256> *cstln;
@@ -610,9 +628,11 @@ namespace leansdr {
 	lut_cos[a] = cosf(a*2*M_PI/65536);
     }
   };
+
   
   // FREQUENCY SHIFTER
-  // Resolution is sample_freq/65536
+
+  // Resolution is sample_freq/65536.
   
   template<typename T>
   struct rotator : runnable {
@@ -649,7 +669,9 @@ namespace leansdr {
     unsigned short index;  // Current phase
   };
 
+
   // SPECTRUM-BASED CNR ESTIMATOR
+
   // Assumes that the spectrum is as follows:
   //
   //  ---|--noise---|-roll-off-|---carrier+noise----|-roll-off-|---noise--|---
