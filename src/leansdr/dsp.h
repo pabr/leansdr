@@ -25,8 +25,8 @@ namespace leansdr {
       complex<Tin> *pin=in.rd(), *pend=pin+count;
       complex<Tout> *pout = out.wr();
       for ( ; pin<pend; ++pin,++pout ) {
-	pout->re = Zout + ((Tout)pin->re-(Tout)Zin)*Gn/Gd;
-	pout->im = Zout + ((Tout)pin->im-(Tout)Zin)*Gn/Gd;
+	pout->re = Zout + (pin->re-(Tin)Zin)*Gn/Gd;
+	pout->im = Zout + (pin->im-(Tin)Zin)*Gn/Gd;
       }
       in.read(count);
       out.written(count);
