@@ -231,6 +231,9 @@ namespace leansdr {
   template<typename T>
   T min(const T &x, const T &y) { return (x<y) ? x : y; }
 
+  template<typename T>
+  T max(const T &x, const T &y) { return (x<y) ? y : x; }
+
 }  // namespace
 
 #endif  // LEANSDR_FRAMEWORK_H
