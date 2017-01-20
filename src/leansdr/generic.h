@@ -217,6 +217,76 @@ private:
     T acc_num, acc_den;
   };
 
+
+  // SERIALIZER
+
+  template<typename Tin, typename Tout>
+  struct serializer : runnable {
+    serializer(scheduler *sch, pipebuf<Tin> &_in, pipebuf<Tout> &_out)
+      : nin(max((size_t)1,sizeof(Tin)/sizeof(Tout))),
+	nout(max((size_t)1,sizeof(Tout)/sizeof(Tin))),
+	in(_in), out(_out,nout)
+    {
+      if ( nin*sizeof(Tin) != nout*sizeof(Tout) )
+	fail("serializer: incompatible sizes");
+    }
+    void run() {
+      while ( in.readable()>=nin && out.writable()>=nout ) {
+	memcpy(out.wr(), in.rd(), nout*sizeof(Tout));
+	in.read(nin);
+	out.written(nout);
+      }
+    }
+  private:
+    int nin, nout;
+    pipereader<Tin> in;
+    pipewriter<Tout> out;
+  };  // serializer
+
+
+  // [buffer_reader] reads from a user-supplied buffer.
+
+  template<typename T>
+  struct buffer_reader : runnable {
+    buffer_reader(scheduler *sch, T *_data, int _count, pipebuf<T> &_out)
+      : runnable(sch, "buffer_reader"),
+	data(_data), count(_count), out(_out), pos(0) {
+    }
+    void run() {
+      int n = min(out.writable(), (unsigned long)(count-pos));
+      memcpy(out.wr(), &data[pos], n*sizeof(T));
+      pos += n;
+      out.written(n);
+    }
+  private:
+    T *data;
+    int count;
+    pipewriter<T> out;
+    int pos;
+  };  // buffer_reader
+
+
+  // [buffer_writer] writes to a user-supplied buffer.
+
+  template<typename T>
+  struct buffer_writer : runnable {
+    buffer_writer(scheduler *sch, pipebuf<T> &_in, T *_data, int _count)
+      : runnable(sch, "buffer_reader"),
+	in(_in), data(_data), count(_count), pos(0) {
+    }
+    void run() {
+      int n = min(in.readable(), (unsigned long)(count-pos));
+      memcpy(&data[pos], in.rd(), n*sizeof(T));
+      in.read(n);
+      pos += n;
+    }
+  private:
+    pipereader<T> in;
+    T *data;
+    int count;
+    int pos;
+  };  // buffer_writer
+
 }  // namespace
 
 #endif  // LEANSDR_GENERIC_H
