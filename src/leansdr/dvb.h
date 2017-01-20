@@ -2,6 +2,8 @@
 #define LEANSDR_DVB_H
 
 #include "leansdr/viterbi.h"
+#include "leansdr/convolutional.h"
+#include "leansdr/sdr.h"
 
 namespace leansdr {
 
@@ -18,7 +20,7 @@ namespace leansdr {
   };
 
   // Customize APSK radii according to code rate
-#include <leansdr/sdr.h>
+
   cstln_lut<256> *make_dvbs2_constellation(cstln_lut<256>::predef c,
 					   code_rate r) {
     float gamma1=1, gamma2=1;
@@ -487,6 +489,136 @@ namespace leansdr {
     return new deconvol_sync_simple(sch, _in, _out, DVBS_G1, DVBS_G2, pX, pY);
   }
 
+
+  // CONVOLUTIONAL ENCODER
+
+  struct dvb_convol : runnable {
+    typedef u8 uncoded_byte;
+    typedef u8 hardsymbol;
+    dvb_convol(scheduler *sch,
+	       pipebuf<uncoded_byte> &_in,
+	       pipebuf<hardsymbol> &_out)
+      : runnable(sch, "dvb_convol"),
+	in(_in), out(_out,8)
+    {
+    }
+    void run() {
+      int count = min(in.readable(), out.writable()/8);
+      static const u8 remap[] = { 0, 1, 2, 3 };
+      convol.run(in.rd(), remap, out.wr(), count);
+      in.read(count);
+      out.written(count*8);
+    }
+  private:
+    pipereader<uncoded_byte> in;
+    pipewriter<hardsymbol> out;
+    convol_poly2<unsigned long, 0171, 0133> convol;
+  };  // dvb_convol
+
+
+  // NEW ALGEBRAIC DECONVOLUTION
+
+  // QPSK 1/2 only;
+  // With DVB-S polynomials hardcoded.
+
+  template<typename Tin>
+  struct dvb_deconvol_sync : runnable {
+    typedef u8 decoded_byte;
+
+    int resync_period;
+
+    static const int chunk_size = 64;  // At least 2*sizeof(Thist)/8
+
+    dvb_deconvol_sync(scheduler *sch,
+		      pipebuf<Tin> &_in,
+		      pipebuf<decoded_byte> &_out)
+      : runnable(sch, "deconvol_sync_multipoly"),
+	resync_period(32),
+	in(_in), out(_out,chunk_size),
+	resync_phase(0)
+    {
+      init_syncs();
+      locked = &syncs[0];
+    }
+
+    void run() {
+
+      while ( in.readable() >= chunk_size*8 &&
+	      out.writable() >= chunk_size ) {
+	int errors_best = 1 << 30;
+	sync_t *best = NULL;
+	for ( sync_t *s=syncs; s<syncs+NSYNCS; ++s ) {
+	  if ( resync_phase!=0 && s!=locked )
+	    // Decode only the currently-locked alignment
+	    continue;
+	  Tin *pin = in.rd();
+	  static decoded_byte dummy[chunk_size];
+	  decoded_byte *pout = (s==locked) ? out.wr() : dummy;
+	  int nerrors = s->deconv.run(pin, s->lut, pout, chunk_size);
+	  if ( nerrors < errors_best ) { errors_best=nerrors; best=s; }
+	}
+	in.read(chunk_size*8);
+	out.written(chunk_size);
+	if ( best != locked ) {
+	  if ( sch->debug ) fprintf(stderr, "%%%d", (int)(best-syncs));
+	  locked = best;
+	}	
+	if ( ++resync_phase >= resync_period ) resync_phase = 0;
+      } // Work to do
+
+    }  // run()
+
+  private:
+    pipereader<Tin> in;
+    pipewriter<decoded_byte> out;
+    int resync_phase;
+    
+    static const int NSYNCS = 4;
+
+    struct sync_t {
+      deconvol_poly2<Tin, unsigned long, 0x3ba, 0x38f70> deconv;
+      u8 lut[4];  // TBD Swap and flip bits in the polynomials instead.
+    } syncs[NSYNCS];
+
+    sync_t *locked;
+
+    void init_syncs() {
+      for ( int s=0; s<NSYNCS; ++s )
+      // EN 300 421, section 4.5, Figure 5 QPSK constellation
+      // Four rotations * two conjugations.
+      // 180° rotation is detected as polarity inversion in mpeg_sync.
+      //         2 | 0
+      //         --+--
+      //         3 | 1
+      // 0°
+      syncs[0].lut[0] = 0;
+      syncs[0].lut[1] = 1;
+      syncs[0].lut[2] = 2;
+      syncs[0].lut[3] = 3;
+      // 90°
+      syncs[1].lut[0] = 2;
+      syncs[1].lut[1] = 0;
+      syncs[1].lut[2] = 3;
+      syncs[1].lut[3] = 1;
+      // 0° conjugated
+      syncs[2].lut[0] = 1;
+      syncs[2].lut[1] = 0;
+      syncs[2].lut[2] = 3;
+      syncs[2].lut[3] = 2;
+      // 90° conjugated
+      syncs[3].lut[0] = 0;
+      syncs[3].lut[1] = 2;
+      syncs[3].lut[2] = 1;
+      syncs[3].lut[3] = 3;
+    }
+
+  };  // dvb_deconvol_sync
+
+
+  typedef dvb_deconvol_sync<softsymbol> dvb_deconvol_sync_soft;
+  typedef dvb_deconvol_sync<u8> dvb_deconvol_sync_hard;
+
+
   // BIT ALIGNMENT AND MPEG SYNC DETECTION
 
   template<typename Tbyte, Tbyte BYTE_ERASED>
@@ -665,10 +797,38 @@ namespace leansdr {
     bool report_state;
   };
 
-  // DEINTERLEAVING
 
   template<typename Tbyte>
   struct rspacket { Tbyte data[SIZE_RSPACKET]; };
+
+
+  // INTERLEAVER
+
+  struct interleaver : runnable {
+    interleaver(scheduler *sch, pipebuf< rspacket<u8> > &_in,
+		pipebuf< u8 > &_out)
+      : runnable(sch, "interleaver"),
+	in(_in), out(_out,SIZE_RSPACKET) {
+    }
+    void run() {
+      while ( in.readable() >= 12 &&
+	      out.writable() >= SIZE_RSPACKET ) {
+	rspacket<u8> *pin=in.rd();
+	u8 *pout = out.wr();
+	int delay = 0;
+	for ( int i=0; i<SIZE_RSPACKET; ++i,++pout,delay=(delay+1)%12 )
+	  *pout = pin[11-delay].data[i];
+	in.read(1);
+	out.written(SIZE_RSPACKET);
+      }
+    }
+  private:
+    pipereader< rspacket<u8> > in;
+    pipewriter<u8> out;
+  };  // interleaver
+
+
+  // DEINTERLEAVER
 
   template<typename Tbyte>
   struct deinterleaver : runnable {
@@ -692,12 +852,58 @@ namespace leansdr {
   private:
     pipereader<Tbyte> in;
     pipewriter< rspacket<Tbyte> > out;
-  };
+  };  // deinterleaver
+
 
   static const int SIZE_TSPACKET = 188;
   struct tspacket { u8 data[SIZE_TSPACKET]; };
 
-  // DERANDOMIZATION
+
+  // RANDOMIZER
+
+  struct randomizer : runnable {
+    randomizer(scheduler *sch,
+	       pipebuf<tspacket> &_in, pipebuf<tspacket> &_out)
+      : runnable(sch, "derandomizer"),
+	in(_in), out(_out) {
+      precompute_pattern();
+      pos = pattern;
+      pattern_end = pattern + sizeof(pattern)/sizeof(pattern[0]);
+    }
+    void precompute_pattern() {
+      // EN 300 421, section 4.4.1 Transport multiplex adaptation
+      pattern[0] = 0xff;  // Invert one in eight sync bytes
+      unsigned short st = 000251;  // 0b 000 000 010 101 001 (Fig 2 reversed)
+      for ( int i=1; i<188*8; ++i ) {
+	u8 out = 0;
+	for ( int n=8; n--; ) {
+	  int bit = ((st>>13) ^ (st>>14)) & 1;  // Taps
+	  out = (out<<1) | bit;  // MSB first
+	  st = (st<<1) | bit;  // Feedback
+	}
+	pattern[i] = (i%188) ? out : 0;  // Inhibit on sync bytes
+      }
+    }
+    void run() {
+      while ( in.readable()>=1 && out.writable()>=1 ) {
+	u8 *pin = in.rd()->data, *pend = pin+SIZE_TSPACKET;
+	u8 *pout= out.wr()->data;
+	if ( pin[0] != MPEG_SYNC ) 
+	  fprintf(stderr, "randomizer: bad MPEG sync %02x\n", pin[0]);
+	for ( ; pin<pend; ++pin,++pout,++pos ) *pout = *pin ^ *pos;
+	if ( pos == pattern_end ) pos = pattern;
+	in.read(1);
+	out.written(1);
+      }
+    }
+  private:
+    u8 pattern[188*8], *pattern_end, *pos;
+    pipereader<tspacket> in;
+    pipewriter<tspacket> out;
+  };  // randomizer
+
+
+  // DERANDOMIZER
 
   struct derandomizer : runnable {
     derandomizer(scheduler *sch,
@@ -755,7 +961,7 @@ namespace leansdr {
     u8 pattern[188*8], *pattern_end, *pos;
     pipereader<tspacket> in;
     pipewriter<tspacket> out;
-  };
+  };  // derandomizer
 
 
   // VITERBI DECODING
