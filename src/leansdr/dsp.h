@@ -153,13 +153,14 @@ namespace leansdr {
       int n = out.writable();
       complex<T> *pout=out.wr(), *pend=pout+n;
       while ( pout < pend ) {
+	// TAOCP
 	float x, y, r2;
 	do {
 	  x = 2*drand48() - 1;
 	  y = 2*drand48() - 1;
 	  r2 = x*x + y*y;
 	} while ( r2==0 || r2>=1 );
-	float k = sqrtf(-2*log(r2)/r2) * stddev;
+	float k = sqrtf(-logf(r2)/r2) * stddev;
 	pout->re = k*x;
 	pout->im = k*y;
 	++pout;
