@@ -7,17 +7,17 @@ namespace leansdr {
   namespace filtergen {
   
     template<typename T>
-    void normalize_coeffs(int n, T *coeffs) {
+    void normalize_coeffs(int n, T *coeffs, float gain=1) {
       T s = 0;
       for ( int i=0; i<n; ++i ) s = s + coeffs[i];
-      T k = (T)1.0 / s;
+      T k = (T)gain / s;
       for ( int i=0; i<n; ++i ) coeffs[i] = coeffs[i] * k;
     }
 
     // Generate coefficients for a sinc filter.
 
     template<typename T>
-    int lowpass(int order, float Fcut, T **coeffs) {
+    int lowpass(int order, float Fcut, T **coeffs, float gain=1) {
       int ncoeffs = order + 1;
       *coeffs = new T[ncoeffs];
       for ( int i=0; i<ncoeffs; ++i ) {
@@ -31,7 +31,7 @@ namespace leansdr {
 #endif
 	(*coeffs)[i] = sinc * window;
       }
-      normalize_coeffs(ncoeffs, *coeffs);
+      normalize_coeffs(ncoeffs, *coeffs, gain);
       return ncoeffs;
     }
     
