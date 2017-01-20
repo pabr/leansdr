@@ -3,6 +3,8 @@
 
 #include "leansdr/math.h"
 
+#define DEBUG_RS 0
+
 namespace leansdr {
 
   // Finite group GF(2^N).
@@ -69,6 +71,25 @@ namespace leansdr {
     // p(X) = X^8 + X^4 + X^3 + X^2 + 1
     gf2x_p<unsigned char, unsigned short, 0x11d, 8, 2> gf;
 
+    u8 G[17];  // { G_16, ..., G_0 }
+
+    rs_engine() {
+      // EN 300 421, section 4.4.2, Code Generator Polynomial
+      // G(X) = (X-alpha^0)*...*(X-alpha^15)
+      for ( int i=0; i<=16; ++i ) G[i] = (i==16) ? 1 : 0;  // Init G=1
+      for ( int d=0; d<16; ++d ) {
+	// Multiply by (X-alpha^d)
+	// G := X*G - alpha^d*G
+	for ( int i=0; i<=16; ++i )
+	  G[i] = gf.sub((i==16)?0:G[i+1], gf.mul(gf.exp(d),G[i]));
+      }
+#if DEBUG_RS
+      fprintf(stderr, "RS generator:");
+      for ( int i=0; i<=16; ++i ) fprintf(stderr, " %02x", G[i]);
+      fprintf(stderr, "\n");
+#endif
+    }
+
     // RS-encoded messages are interpreted as coefficients in
     // GF(256) of a polynomial P.
     // The syndromes are synd[i] = P(alpha^i).
@@ -98,12 +119,40 @@ namespace leansdr {
       return acc;
     }
 
+    // Append parity symbols
+
+    void encode(u8 msg[204]) {
+      // TBD Avoid copying
+      u8 p[204];
+      memcpy(p, msg, 188);
+      memset(p+188, 0, 16);
+      // p = msg*X^16
+#if DEBUG_RS
+      fprintf(stderr, "uncoded:");
+      for ( int i=0; i<204; ++i ) fprintf(stderr, " %d", p[i]);
+      fprintf(stderr, "\n");
+#endif
+      // Compute remainder modulo G
+      for ( int d=0; d<188; ++d ) {
+	// Clear monomial of degree d
+	if ( ! p[d] ) continue;
+	u8 k = gf.div(p[d], G[0]);
+	// p(X) := p(X) - k*G(X)*X^(188-d)
+	for ( int i=0; i<=16; ++i )
+	  p[d+i] = gf.sub(p[d+i], gf.mul(k,G[i]));
+      }
+#if DEBUG_RS
+      fprintf(stderr, "coded:");
+      for ( int i=0; i<204; ++i ) fprintf(stderr, " %d", p[i]);
+      fprintf(stderr, "\n");
+#endif
+      memcpy(msg+188, p+188, 16);
+    }
+
     // Try to fix errors in pout[].
     // If pin[] is provided, errors will be fixed in the original
     // message too and syndromes will be updated.
 
-#define DEBUG_RS 0
-  
     bool correct(u8 synd[16], u8 pout[188],
 		 u8 pin[204]=NULL, int *bits_corrected=NULL) {
       // Berlekamp - Massey
@@ -205,6 +254,37 @@ namespace leansdr {
 
   };
 
+  
+  // RS ENCODER
+
+  struct rs_encoder : runnable {
+    rs_encoder(scheduler *sch,
+	       pipebuf<tspacket> &_in, pipebuf< rspacket<u8> > &_out)
+      : runnable(sch, "RS encoder"),
+	in(_in), out(_out) { }
+
+    void run() {
+      while ( in.readable()>=1 && out.writable()>=1 ) {
+	u8 *pin = in.rd()->data;
+	u8 *pout = out.wr()->data;
+	// The first 188 bytes are the uncoded message P(X)
+	memcpy(pout, pin, SIZE_TSPACKET);
+	// Append 16 RS parity bytes R(X) = - (P(X)*X^16 mod G(X))
+	// so that G(X) divides the coded message S(X) = P(X)*X^16 - R(X).
+	rs.encode(pout);
+	in.read(1);
+	out.written(1);
+      }
+    }
+  private:
+    rs_engine rs;
+    pipereader<tspacket> in;
+    pipewriter< rspacket<u8> > out;
+  };  // rs_encoder
+
+
+  // RS DECODER
+
   template<typename Tbyte, int BYTE_ERASED>
   struct rs_decoder : runnable {
     rs_engine rs;
@@ -278,7 +358,7 @@ namespace leansdr {
     pipereader< rspacket<Tbyte> > in;
     pipewriter<tspacket> out;
     pipewriter<int> *bitcount, *errcount;
-  };
+  };  // rs_decoder
 
 }  // namespace
 
