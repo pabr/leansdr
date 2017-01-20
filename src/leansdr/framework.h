@@ -38,7 +38,9 @@ namespace leansdr {
     runnable_common(const char *_name) : name(_name) { }
     virtual void run() { }
     virtual void shutdown() { }
-    ~runnable_common() { fprintf(stderr, "Destroying %s !\n", name); }
+#ifdef DEBUG
+    ~runnable_common() { fprintf(stderr, "Deallocating %s !\n", name); }
+#endif
   };
   
   struct window_placement {
@@ -159,7 +161,9 @@ namespace leansdr {
     }
     unsigned long min_write;
     unsigned long total_written, total_read;
-    ~pipebuf() { fprintf(stderr, "Destroying %s !\n", name); }
+#ifdef DEBUG
+    ~pipebuf() { fprintf(stderr, "Deallocating %s !\n", name); }
+#endif
   };
   
   template<typename T>
