@@ -265,7 +265,86 @@ namespace leansdr {
     float *freq_tap;
     float tap_multiplier;
     float freq_tol;
-  };
+  };  // fir_filter
+
+
+  // FIR FILTER WITH INTERPOLATION AND DECIMATION
+
+  template<typename T, typename Tc>
+  struct fir_resampler : runnable {
+    fir_resampler(scheduler *sch, int _ncoeffs, Tc *_coeffs,
+		  pipebuf<T> &_in, pipebuf<T> &_out,
+		  int _interp=1, int _decim=1)
+      : runnable(sch, "fir_resampler"),
+	ncoeffs(_ncoeffs), coeffs(_coeffs),
+	interp(_interp), decim(_decim),
+	in(_in), out(_out,interp),
+	freq_tap(NULL), tap_multiplier(1), freq_tol(0.1)
+    {
+      if ( decim != 1 ) fail("fir_resampler: decim not implemented");  // TBD
+      shifted_coeffs = new T[ncoeffs];
+      set_freq(0);
+    }
+    
+    void run() {
+      if ( in.readable() < ncoeffs ) return;
+
+      if ( freq_tap ) {
+	float new_freq = *freq_tap * tap_multiplier;
+	if ( fabs(current_freq-new_freq) > freq_tol ) {
+	  if ( sch->verbose )
+	    fprintf(stderr, "Shifting filter %f -> %f\n",
+		    current_freq, new_freq);
+	  set_freq(new_freq);
+	}
+      }
+
+      if ( in.readable()*interp < ncoeffs ) return;
+      unsigned long count = min((in.readable()*interp-ncoeffs)/interp,
+				out.writable()/interp);
+      int latency = (ncoeffs+interp) / interp;
+      T *pin=in.rd()+latency, *pend=pin+count, *pout=out.wr();
+      // TBD use coeffs when current_freq=0 (fewer mults if float)
+      for ( ; pin<pend; ++pin ) {
+	for ( int i=0; i<interp; ++i,++pout ) {
+	  T *pi = pin;
+	  T *pc = shifted_coeffs+i, *pcend=shifted_coeffs+ncoeffs;
+	  T x = 0;
+	  for ( ; pc<pcend; pc+=interp,--pi )
+	    x = x + (*pc)*(*pi);
+	  *pout = x;
+	}
+      }
+      in.read(count);
+      out.written(count*interp);
+    }
+    
+  private:
+    unsigned int ncoeffs;
+    Tc *coeffs;
+    int interp, decim;
+    pipereader<T> in;
+    pipewriter<T> out;
+
+  public:
+    float *freq_tap;
+    float tap_multiplier;
+    float freq_tol;
+
+  private:
+    T *shifted_coeffs; 
+    float current_freq;
+    void set_freq(float f) {
+      for ( int i=0; i<ncoeffs; ++i ) {
+	float c, s;
+	sincosf(2*M_PI*f*i, &s, &c);
+	// TBD Support T=complex
+	shifted_coeffs[i].re = coeffs[i] * c;
+	shifted_coeffs[i].im = coeffs[i] * s;
+      }
+      current_freq = f;
+    }
+  };  // fir_resampler
 
 }  // namespace
 
