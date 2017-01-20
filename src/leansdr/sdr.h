@@ -2,6 +2,7 @@
 #define LEANSDR_SDR_H
 
 #include "leansdr/math.h"
+#include "leansdr/dsp.h"
 
 namespace leansdr {
 
@@ -494,7 +495,7 @@ namespace leansdr {
 #endif  
 	    
 	    // Modified Mueller and Müller
-	    // mu[k]=real(c[k]-c[k-2])*conj(p[k-1])-(p[k]-p[k-2])*conj(c[k-1]))
+	    // mu[k]=real((c[k]-c[k-2])*conj(p[k-1])-(p[k]-p[k-2])*conj(c[k-1]))
 	    //      =dot(c[k]-c[k-2],p[k-1]) - dot(p[k]-p[k-2],c[k-1])
 	    // p = received signals
 	    // c = decisions (constellation points)
@@ -549,6 +550,7 @@ namespace leansdr {
 	  float sig_power, ev_power;
 	  if ( cstln->nsymbols == 2 ) {
 	    // Special case for BPSK: Ignore quadrature component of noise.
+	    // TBD Projection on I axis assumes BPSK at 45°
 	    float sig_real = (cstln_point->re+cstln_point->im) * 0.707;
 	    float ev_real = (ev.re+ev.im) * 0.707;
 	    sig_power = sig_real * sig_real;
@@ -628,7 +630,7 @@ namespace leansdr {
 	lut_cos[a] = cosf(a*2*M_PI/65536);
     }
   };
-
+ 
   
   // FREQUENCY SHIFTER
 
@@ -687,7 +689,7 @@ namespace leansdr {
 	bandwidth(_bandwidth), freq_tap(NULL), tap_multiplier(1),
 	decimation(1048576), kavg(0.1),
 	in(_in), out(_out),
-	fft(nfft), avgmag(NULL), phase(0) {
+	fft(nfft), avgpower(NULL), phase(0) {
       if ( bandwidth > 0.33 )
 	fail("CNR estimator requires Fsampling > 3x Fsignal");
     }
@@ -714,40 +716,39 @@ namespace leansdr {
       complex<T> data[fft.n];
       memcpy(data, in.rd(), fft.n*sizeof(data[0]));
       fft.inplace(data, true);
-      T mag[fft.n];
+      T power[fft.n];
       for ( int i=0; i<fft.n; ++i )
-	mag[i] = data[i].re*data[i].re + data[i].im*data[i].im;
-      if ( ! avgmag ) {
-	avgmag = new T[fft.n];
-	memcpy(avgmag, mag, fft.n*sizeof(avgmag[0]));
+	power[i] = data[i].re*data[i].re + data[i].im*data[i].im;
+      if ( ! avgpower ) {
+	avgpower = new T[fft.n];
+	memcpy(avgpower, power, fft.n*sizeof(avgpower[0]));
       }
       for ( int i=0; i<fft.n; ++i )
-	avgmag[i] = avgmag[i]*(1-kavg) + mag[i]*kavg;
+	avgpower[i] = avgpower[i]*(1-kavg) + power[i]*kavg;
       
       int bwslots = (bandwidth/2) * fft.n;
       if ( ! bwslots ) return;
       // Measure carrier+noise in center band
-      float c2plusn2 = sumslots(icf-bwslots, icf+bwslots);
+      float c2plusn2 = avgslots(icf-bwslots, icf+bwslots);
       // Measure noise left and right of roll-off zones
-      float n2 = ( sumslots(icf-bwslots*3, icf-bwslots*2) +
-		   sumslots(icf+bwslots*2, icf+bwslots*3) ) / 2;
+      float n2 = ( avgslots(icf-bwslots*3, icf-bwslots*2) +
+		   avgslots(icf+bwslots*2, icf+bwslots*3) ) / 2;
       float c2 = c2plusn2 - n2;
       float cnr = (c2>0 && n2>0) ? 10 * logf(c2/n2)/logf(10) : -50;
       *out.wr() = cnr;
       out.written(1);
     }
 
-    T *avgdata;
-    float sumslots(int i0, int i1) {  // i0 <= i1
+    float avgslots(int i0, int i1) {  // i0 <= i1
       T s = 0;
-      for ( int i=i0; i<=i1; ++i ) s += avgmag[i&(fft.n-1)];
+      for ( int i=i0; i<=i1; ++i ) s += avgpower[i&(fft.n-1)];
       return s / (i1-i0+1);
     }
     
     pipereader< complex<T> > in;
     pipewriter< float > out;
     cfft_engine<T> fft;
-    T *avgmag;
+    T *avgpower;
     int phase;
   };
   
