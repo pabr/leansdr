@@ -414,12 +414,9 @@ namespace leansdr {
 	}
 	if ( best != locked ) {
 	  // Another alignment produces fewer bit errors
-#if 0
-	  fprintf(stderr, "[sync %d->%d=%lu]\n",
-		  (int)(locked-syncs), (int)(best-syncs),
-		  errors_best*100/n/8);
-#endif
-	  // fprintf(stderr, "%%");
+	  if ( sch->debug )
+	    fprintf(stderr, "{%d->%d}\n",
+		    (int)(locked-syncs), (int)(best-syncs));
 	  locked = best;
 	}
 	// If deconvolution bit error rate > 33%, try next sample alignment
@@ -1042,7 +1039,7 @@ namespace leansdr {
 	      for ( int s=0; s<NSYNCS; ++s ) {
 		TPM discr;
 		bits[s] = update_sync(s, pin->metrics4, &discr);
-		if ( bytenum >= TRACEBACK ) totaldiscr[s] += discr;
+		if ( bytenum*8 > TRACEBACK ) totaldiscr[s] += discr;
 	      }
 	      byte = (byte<<1) | bits[current_sync];
 	    }
@@ -1063,7 +1060,7 @@ namespace leansdr {
 	  for ( int s=0; s<NSYNCS; ++s )
 	    if ( totaldiscr[s] > totaldiscr[best] ) best = s;
 	  if ( best != current_sync ) {
-	    if ( sch->debug ) fprintf(stderr, "%%%d", best);
+	    if ( sch->debug ) fprintf(stderr, "{%d->%d}", current_sync, best);
 	    current_sync = best;
 	  }
 	}
