@@ -90,7 +90,7 @@ struct config {
       duration(60),
       linger(false),
       fd_info(-1),
-      Finfo(2),
+      Finfo(5),
       fd_const(-1) {
   }
 };
@@ -236,7 +236,7 @@ int run(config &cfg) {
     if ( cfg.verbose )
       fprintf(stderr, "Measuring CNR\n");
     r_cnr = new cnr_fft<f32>(&sch, *p_preprocessed, p_cnr, cfg.Fm/cfg.Fs);
-    r_cnr->decimation = 128*1024;  // Same as demod.decimation
+    r_cnr->decimation = decimation(cfg.Fs, 1);  // 1 Hz
   }
 
   // FILTERING
@@ -374,8 +374,7 @@ int run(config &cfg) {
 	      demod.min_freqw*cfg.Fs/65536/1000,
 	      demod.max_freqw*cfg.Fs/65536/1000);
   }
-  demod.meas_decimation = 128*1024;
-  demod.meas_decimation /= decim;
+  demod.meas_decimation = decimation(cfg.Fs, cfg.Finfo);
 
   // TRACKING FILTERS
 
@@ -444,7 +443,7 @@ int run(config &cfg) {
 
   pipebuf<float> p_vber(&sch, "VBER", BUF_SLOW);
   rate_estimator<float> r_vber(&sch, p_verrcount, p_vbitcount, p_vber);
-  r_vber.sample_size = cfg.Fm;  // About once per second, depending on CR
+  r_vber.sample_size = cfg.Fm/2;  // About twice per second, depending on CR
   // Require resolution better than 2E-5
   if ( r_vber.sample_size < 50000 ) r_vber.sample_size = 50000;
 
@@ -515,7 +514,7 @@ int run(config &cfg) {
     { &p_cnr, "CNR", "%5.1f dB", {255,255,0},
       1, -10,20, 
       (r_cnr?
-       slowmultiscope<f32>::chanspec::DEFAULT:
+       slowmultiscope<f32>::chanspec::ASYNC:
        slowmultiscope<f32>::chanspec::DISABLED) },
     { &p_tscount, "TS recovery", "%3.0f %%", {255,255,0},
       110/max_packets_per_pixel, 0, 101,
@@ -659,8 +658,7 @@ int run_highspeed(config &cfg) {
 	      demod.min_freqw*cfg.Fs/65536/1000,
 	      demod.max_freqw*cfg.Fs/65536/1000);
   }
-  demod.meas_decimation = cfg.Fs / 10;  // About 10 Hz
-  if ( demod.meas_decimation < 128 ) demod.meas_decimation = 128;
+  demod.meas_decimation = decimation(cfg.Fs, cfg.Finfo);
 
 #ifdef GUI
   if ( cfg.gui ) {
