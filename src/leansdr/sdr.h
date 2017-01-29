@@ -885,6 +885,38 @@ namespace leansdr {
   };  // fast_qpsk_receiver
   
 
+  // CONSTELLATION TRANSMITTER
+
+  // Maps symbols to I/Q points.
+
+  template<typename Tout, int Zout>
+  struct cstln_transmitter : runnable {
+    cstln_lut<256> *cstln;
+    cstln_transmitter(scheduler *sch,
+		      pipebuf<u8> &_in, pipebuf< complex<Tout> > &_out)
+      : runnable(sch, "cstln_transmitter"),
+	in(_in), out(_out)
+    {
+    }
+    void run() {
+      if ( ! cstln ) fail("constellation not set");
+      int count = min(in.readable(), out.writable());
+      u8 *pin=in.rd(), *pend=pin+count;
+      complex<Tout> *pout = out.wr();
+      for ( ; pin<pend; ++pin,++pout ) {
+	complex<signed char> *cp = &cstln->symbols[*pin];
+	pout->re = Zout + cp->re;
+	pout->im = Zout + cp->im;
+      }
+      in.read(count);
+      out.written(count);
+    }
+  private:
+    pipereader<u8> in;
+    pipewriter< complex<Tout> > out;
+  };  // cstln_transmitter
+
+
   // FREQUENCY SHIFTER
 
   // Resolution is sample_freq/65536.
