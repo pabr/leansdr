@@ -630,7 +630,8 @@ namespace leansdr {
 	      pipebuf<Tbyte> &_in,
 	      pipebuf<Tbyte> &_out,
 	      deconvol_sync<Tbyte,0> *_deconv,
-	      pipebuf<int> *_state_out=NULL)
+	      pipebuf<int> *_state_out=NULL,
+	      pipebuf<unsigned long> *_locktime_out=NULL)
       : runnable(sch, "sync_detect"),
 	scan_syncs(8), want_syncs(4),
 	lock_timeout(4),
@@ -644,6 +645,8 @@ namespace leansdr {
 	next_sync_count(0),
 	report_state(true) {
       state_out = _state_out ? new pipewriter<int>(*_state_out) : NULL;
+      locktime_out =
+	_locktime_out ? new pipewriter<unsigned long>(*_locktime_out) : NULL;
     }
     
     void run() {
@@ -738,6 +741,7 @@ namespace leansdr {
 	  in.read(i);  // Skip to first start code
 	  synchronized = true;
 	  lock_timeleft = lock_timeout;
+	  locktime = 0;
 	  if ( state_out ) {
 	    *state_out->wr() = 1;
 	    state_out->written(1);
@@ -751,7 +755,8 @@ namespace leansdr {
     void run_decoding() {
       while ( in.readable() >= SIZE_RSPACKET+1 &&  // +1 for bit shifting
 	      out.writable() >= SIZE_RSPACKET &&
-	      ( !state_out || state_out->writable()>=1 ) ) {
+	      ( !state_out || state_out->writable()>=1 ) &&
+	      ( !locktime_out || locktime_out->writable()>=1 ) ) {
 	Tbyte *pin = in.rd(), *pend = pin+SIZE_RSPACKET;
 	Tbyte *pout = out.wr();
 	unsigned short w = *pin++;
@@ -762,6 +767,11 @@ namespace leansdr {
 	in.read(SIZE_RSPACKET);
 	Tbyte syncbyte = *out.wr();
 	out.written(SIZE_RSPACKET);
+	++locktime;
+	if ( locktime_out ) {
+	  *locktime_out->wr() = locktime;
+	  locktime_out->written(1);
+	}
 	// Reset timer if sync byte is correct
 	Tbyte expected = phase8 ? MPEG_SYNC : MPEG_SYNC_INV;
 	if ( syncbyte == expected ) lock_timeleft = lock_timeout;
@@ -791,7 +801,9 @@ namespace leansdr {
     int next_sync_count;
     int phase8;  // Position in 8-packet cycle, -1 if not synchronized
     unsigned long lock_timeleft;
+    unsigned long locktime;
     pipewriter<int> *state_out;
+    pipewriter<unsigned long> *locktime_out;
     bool report_state;
   };
 

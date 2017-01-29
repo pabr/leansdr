@@ -54,6 +54,7 @@ struct config {
   float duration;    // Horizontal span of timeline GUI (s)
   bool linger;       // Keep GUI running after EOF
   int fd_info;       // FD for status information in text format, or -1
+  float Finfo;       // Desired refresh rate on fd_info (Hz)
   int fd_const;      // FD for constellation and symbols, or -1
 
   config()
@@ -89,9 +90,15 @@ struct config {
       duration(60),
       linger(false),
       fd_info(-1),
+      Finfo(2),
       fd_const(-1) {
   }
 };
+
+int decimation(float Fin, float Fout) {
+  int d = Fin / Fout;
+  return max(d, 1);
+}
 
 int run(config &cfg) {
 
@@ -415,7 +422,9 @@ int run(config &cfg) {
 
   pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
   pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
-  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, r_deconv, &p_lock);
+  pipebuf<u32> p_locktime(&sch, "locktime", BUF_PACKETS);
+  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, r_deconv,
+			 &p_lock, &p_locktime);
   r_sync.fastlock = cfg.fastlock;
 
   // DEINTERLEAVING
@@ -457,6 +466,8 @@ int run(config &cfg) {
     new file_printer<f32>(&sch, "SS %f\n", p_ss, cfg.fd_info);
     new file_printer<f32>(&sch, "MER %.1f\n", p_mer, cfg.fd_info);
     new file_printer<int>(&sch, "LOCK %d\n", p_lock, cfg.fd_info);
+    new file_printer<u32>(&sch, "LOCKTIME %lu\n", p_locktime, cfg.fd_info,
+			  decimation(cfg.Fm/8/204, cfg.Finfo));  // TBD CR
     new file_printer<f32>(&sch, "CNR %.1f\n", p_cnr, cfg.fd_info);
     new file_printer<float>(&sch, "VBER %.6f\n", p_vber, cfg.fd_info);
     // Output constants immediately
@@ -676,7 +687,9 @@ int run_highspeed(config &cfg) {
 
   pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
   pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
-  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, NULL, &p_lock);
+  pipebuf<u32> p_locktime(&sch, "locktime", BUF_PACKETS);
+  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, NULL,
+			 &p_lock, &p_locktime);
   r_sync.fastlock = true;
   r_sync.resync_period = cfg.fastlock ? 1 : 32;
     
@@ -717,6 +730,8 @@ int run_highspeed(config &cfg) {
       new file_printer<f32>(&sch, "FREQ %.0f\n", p_freq, cfg.fd_info);
     r_printfreq->scale = cfg.Fs;
     new file_printer<int>(&sch, "LOCK %d\n", p_lock, cfg.fd_info);
+    new file_printer<u32>(&sch, "LOCKTIME %lu\n", p_locktime, cfg.fd_info,
+			  decimation(cfg.Fm/8/204, cfg.Finfo));  // TBD CR
     new file_printer<float>(&sch, "VBER %.6f\n", p_vber, cfg.fd_info);
     // Output constants immediately
     FILE *f = fdopen(cfg.fd_info, "w");
