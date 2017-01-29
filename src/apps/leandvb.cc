@@ -23,9 +23,11 @@ using namespace leansdr;
 
 struct config {
   bool verbose, debug;
+  bool highspeed;    // Demodulate raw u8 I/Q without preprocessing
   enum { INPUT_U8, INPUT_F32 } input_format;
   float float_scale; // Scaling factor for float data.
   bool loop_input;
+  int input_buffer;  // Extra input buffer size
   float Fs;          // Sampling frequency (Hz) 
   float Fderot;      // Shift the signal (Hz). Note: Ftune is faster
   int anf;           // Number of auto notch filters
@@ -57,9 +59,11 @@ struct config {
   config()
     : verbose(false),
       debug(false),
+      highspeed(false),
       input_format(INPUT_U8),
       float_scale(1.0),
       loop_input(false),
+      input_buffer(0),
       Fs(2.4e6),
       Fderot(0),
       anf(1),
@@ -143,7 +147,7 @@ int run(config &cfg) {
 
   if ( cfg.input_format == config::INPUT_U8 ) {
     pipebuf<cu8> *p_stdin =
-      new pipebuf<cu8>(&sch, "stdin", BUF_BASEBAND);
+      new pipebuf<cu8>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
     file_reader<cu8> *r_stdin =
       new file_reader<cu8>(&sch, 0, *p_stdin);
     r_stdin->loop = cfg.loop_input;
@@ -152,7 +156,7 @@ int run(config &cfg) {
   }
   if ( cfg.input_format == config::INPUT_F32 ) {
     pipebuf<cf32> *p_stdin =
-      new pipebuf<cf32>(&sch, "stdin", BUF_BASEBAND);
+      new pipebuf<cf32>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
     file_reader<cf32> *r_stdin =
       new file_reader<cf32>(&sch, 0, *p_stdin);
     r_stdin->loop = cfg.loop_input;
@@ -324,7 +328,7 @@ int run(config &cfg) {
       new file_writer<cf32>(&sch, *p_preprocessed, cfg.fd_pp);
   }
 
-  // QPSK
+  // Generic constellation receiver
 
   pipebuf<softsymbol> p_symbols(&sch, "PSK soft-symbols", BUF_SYMBOLS);
   pipebuf<f32> p_freq(&sch, "freq", BUF_SLOW);
@@ -335,17 +339,17 @@ int run(config &cfg) {
   cstln_receiver<f32> demod(&sch, *p_preprocessed, p_symbols,
 			    &p_freq, &p_ss, &p_mer, &p_sampled);
   cstln_lut<256> qpsk(cstln_lut<256>::QPSK);
-  if ( cfg.hard_metric ) {
-    if ( cfg.verbose )
-      fprintf(stderr, "Using hard metric.\n");
-    qpsk.harden();
-  }
   demod.cstln = &qpsk;
   if ( cfg.standard == config::DVB_S2 ) {
     // For DVB-S2 testing only.
     // Constellation should be determined from PL signalling.
     fprintf(stderr, "DVB-S2: Testing symbol sampler only.\n");
     demod.cstln = make_dvbs2_constellation(cfg.constellation, cfg.fec);
+  }
+  if ( cfg.hard_metric ) {
+    if ( cfg.verbose )
+      fprintf(stderr, "Using hard metric.\n");
+    demod.cstln->harden();
   }
   demod.set_omega(cfg.Fs/cfg.Fm);
   if ( cfg.Ftune ) {
@@ -393,16 +397,9 @@ int run(config &cfg) {
   }
 #endif
 
-  // NOT VITERBI (deconvolution only)
-  // SYNCHRONIZATION
-
-  //  pipebuf<u8> p_bits(&sch, "bits", BUF_DEINTERLEAVE*8);
-  // EN 300 421, section 4.4.3, table 2 Punctured code, G1=0171, G2=0133
-  //  deconvol r_deconv(&sch, p_symbols, p_bits, 0171, 0133, FEC78);
-  //  deconvol_sync r_deconv(&sch, p_symbols, p_bits, FEC12);
+  // DECONVOLUTION AND SYNCHRONIZATION
 
   pipebuf<u8> p_bytes(&sch, "bytes", BUF_BYTES);
-  pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
 
   deconvol_sync_simple *r_deconv = NULL;
 
@@ -410,13 +407,14 @@ int run(config &cfg) {
     if ( cfg.fec != FEC12 )
       fail("Viterbi only for code rate 1/2");
     viterbi_sync *r_viterbi = new viterbi_sync(&sch, p_symbols, p_bytes);
-    if ( cfg.fastlock ) r_viterbi->sync_decimation = 1;
+    if ( cfg.fastlock ) r_viterbi->resync_period = 1;
   } else {
     r_deconv = make_deconvol_sync_simple(&sch, p_symbols, p_bytes, cfg.fec);
     r_deconv->fastlock = cfg.fastlock;
   }
 
   pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
+  pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
   mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, r_deconv, &p_lock);
   r_sync.fastlock = cfg.fastlock;
 
@@ -543,6 +541,245 @@ int run(config &cfg) {
   return 0;
 }
 
+
+int run_highspeed(config &cfg) {
+
+  int w_timeline = 512, h_timeline = 256;
+  int w_fft = 1024, h_fft = 256;
+  int wh_const = 256;
+  
+  scheduler sch;
+  sch.verbose = cfg.verbose;
+  sch.debug = cfg.debug;
+
+  int x0 = 100, y0 = 40;
+  
+  window_placement window_hints[] = {
+    { "rawiq (iq)", x0, y0, wh_const,wh_const },
+    { "PSK symbols", x0, y0+600, wh_const, wh_const },
+    { "timeline", x0+300, y0+600, w_timeline, h_timeline },
+    { NULL, }
+  };
+  sch.windows = window_hints;
+
+  int BUF_OVERSIZE = 4;
+  // Min buffer size for baseband data
+  //   scopes: 1024
+  //   ss_estimator: 1024
+  //   anf: 4096
+  //   cstln_receiver: reads in chunks of 128+1
+  unsigned long BUF_BASEBAND = 4096 * BUF_OVERSIZE;
+  // Min buffer size for IQ symbols
+  //   cstln_receiver: writes in chunks of 128/omega symbols (margin 128)
+  //   deconv_sync: reads at least 64+32
+  // A larger buffer improves performance significantly.
+  unsigned long BUF_SYMBOLS = 1024 * BUF_OVERSIZE;
+  // Min buffer size for unsynchronized bytes
+  //   deconv_sync: writes 32 bytes
+  //   mpeg_sync: reads up to 204*scan_syncs = 1632 bytes
+  unsigned long BUF_BYTES = 2048 * BUF_OVERSIZE;
+  // Min buffer size for synchronized (but interleaved) bytes
+  //   mpeg_sync: writes 1 rspacket
+  //   deinterleaver: reads 17*11*12+204 = 2448 bytes
+  unsigned long BUF_MPEGBYTES = 2448 * BUF_OVERSIZE;
+  // Min buffer size for packets: 1
+  unsigned long BUF_PACKETS = BUF_OVERSIZE;
+  // Min buffer size for misc measurements: 1
+  unsigned long BUF_SLOW = BUF_OVERSIZE;
+
+  // HIGHSPEED: INPUT
+  
+  if ( cfg.input_format != config::INPUT_U8 )
+    fail("--hs requires --u8");
+
+  pipebuf<cu8> p_rawiq(&sch, "rawiq", BUF_BASEBAND+cfg.input_buffer);
+  file_reader<cu8> r_stdin(&sch, 0, p_rawiq);
+  r_stdin.loop = cfg.loop_input;
+
+#ifdef GUI
+  float amp = 128;
+
+  if ( cfg.gui ) {
+    cscope<u8> *r_cscope_raw =
+      new cscope<u8>(&sch, p_rawiq, 0, 2*amp, "rawiq (iq)");
+  }
+#endif
+
+  // HIGHSPEED: QPSK
+
+#define ALGEBRAIC_COMPAT 0  // Use legacy constellation receiver ?
+
+  pipebuf<f32> p_freq(&sch, "freq", BUF_SLOW);
+  pipebuf<cu8> p_sampled(&sch, "PSK symbols", BUF_BASEBAND);
+#if ALGEBRAIC_COMPAT
+  fprintf(stderr, "--hs: Using legacy receiver (slower)\n");
+  pipebuf<cf32> p_rawiqf(&sch, "rawiq float", BUF_BASEBAND);
+  cconverter<u8,128, f32,0, 1,1> r_convert_in(&sch, p_rawiq, p_rawiqf);
+
+  pipebuf<softsymbol> p_symbols(&sch, "PSK soft-symbols", BUF_SYMBOLS);
+  pipebuf<cf32> p_sampledf(&sch, "PSK fsymbols", BUF_BASEBAND);
+  // TBD retype preprocess as unsigned char
+  cstln_receiver<f32> demod(&sch, p_rawiqf, p_symbols,
+			    &p_freq, NULL, NULL, &p_sampledf);
+  cstln_lut<256> qpsk(cstln_lut<256>::QPSK);
+  demod.cstln = &qpsk;
+  // Convert the sampled symbols to cu8 for GUI
+  cconverter<f32,0, u8,128, 1,1>
+    r_convert_samp(&sch, p_sampledf, p_sampled);
+#else
+  // Use the new fixed-point receiver
+  pipebuf<u8> p_symbols(&sch, "PSK hard symbols", BUF_SYMBOLS);
+  fast_qpsk_receiver<u8> demod(&sch, p_rawiq, p_symbols,
+			       &p_freq, &p_sampled);
+#endif
+  demod.set_omega(cfg.Fs/cfg.Fm);
+  if ( cfg.Ftune ) {
+    if ( cfg.verbose )
+      fprintf(stderr, "Biasing receiver to %.3f kHz\n", cfg.Ftune/1e3);
+    demod.set_freq(cfg.Ftune/cfg.Fs);
+  }
+  if ( cfg.allow_drift ) {
+    if ( cfg.verbose )
+      fprintf(stderr, "Allowing unlimited drift.\n");
+    demod.allow_drift = true;
+  } else {
+    if ( cfg.verbose )
+      fprintf(stderr, "Frequency offset limits: %+.3f..%+.3f kHz.\n",
+	      demod.min_freqw*cfg.Fs/65536/1000,
+	      demod.max_freqw*cfg.Fs/65536/1000);
+  }
+  demod.meas_decimation = cfg.Fs / 10;  // About 10 Hz
+  if ( demod.meas_decimation < 128 ) demod.meas_decimation = 128;
+
+#ifdef GUI
+  if ( cfg.gui ) {
+    cscope<u8> *r_scope_symbols =
+      new cscope<u8>(&sch, p_sampled, 0,2*amp);
+    r_scope_symbols->decimation = 1;
+  }
+#endif
+
+  // HIGHSPEED: DECONVOLUTION
+
+  if ( cfg.fec != FEC12 )
+    fail("--hs currently supports code rate 1/2 only");
+
+  pipebuf<u8> p_bytes(&sch, "bytes", BUF_BYTES);
+#if ALGEBRAIC_COMPAT
+  dvb_deconvol_sync_soft r_deconv(&sch, p_symbols, p_bytes);
+#else
+  dvb_deconvol_sync_hard r_deconv(&sch, p_symbols, p_bytes);
+#endif
+  r_deconv.resync_period = cfg.fastlock ? 1 : 32;
+
+  // HIGHSPEED: SYNCHRONIZATION
+
+  pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
+  pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
+  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, NULL, &p_lock);
+  r_sync.fastlock = true;
+  r_sync.resync_period = cfg.fastlock ? 1 : 32;
+    
+  // HIGHSPEED: DEINTERLEAVING
+
+  pipebuf< rspacket<u8> > p_rspackets(&sch, "RS-enc packets", BUF_PACKETS);
+  deinterleaver<u8> r_deinter(&sch, p_mpegbytes, p_rspackets);
+
+  // HIGHSPEED: REED-SOLOMON
+
+  pipebuf<int> p_vbitcount(&sch, "Bits processed", BUF_PACKETS);
+  pipebuf<int> p_verrcount(&sch, "Bits corrected", BUF_PACKETS);
+  pipebuf<tspacket> p_rtspackets(&sch, "rand TS packets", BUF_PACKETS);
+  rs_decoder<u8,0> r_rsdec(&sch, p_rspackets, p_rtspackets,
+			   &p_vbitcount, &p_verrcount);
+
+  // HIGHSPEED: BER ESTIMATION
+
+  pipebuf<float> p_vber(&sch, "VBER", BUF_SLOW);
+  rate_estimator<float> r_vber(&sch, p_verrcount, p_vbitcount, p_vber);
+  r_vber.sample_size = cfg.Fm/2;  // About twice per second, depending on CR
+  // Require resolution better than 2E-5
+  if ( r_vber.sample_size < 50000 ) r_vber.sample_size = 50000;
+
+  // DERANDOMIZATION
+
+  pipebuf<tspacket> p_tspackets(&sch, "TS packets", BUF_PACKETS);
+  derandomizer r_derand(&sch, p_rtspackets, p_tspackets);
+
+  // OUTPUT
+
+  file_writer<tspacket> r_stdout(&sch, p_tspackets, 1);
+
+  // AUX OUTPUT
+
+  if ( cfg.fd_info >= 0 ) {
+    file_printer<f32> *r_printfreq =
+      new file_printer<f32>(&sch, "FREQ %.0f\n", p_freq, cfg.fd_info);
+    r_printfreq->scale = cfg.Fs;
+    new file_printer<int>(&sch, "LOCK %d\n", p_lock, cfg.fd_info);
+    new file_printer<float>(&sch, "VBER %.6f\n", p_vber, cfg.fd_info);
+    // Output constants immediately
+    FILE *f = fdopen(cfg.fd_info, "w");
+    static const char *fec_names[] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
+    fprintf(f, "CR %s\n", fec_names[cfg.fec]);
+    fprintf(f, "SR %f\n", cfg.Fm);
+    fflush(f);
+  }
+  if ( cfg.fd_const >= 0 ) {
+    new file_carrayprinter<u8>(&sch, "SYMBOLS %d", " %d,%d", "\n",
+				p_sampled, cfg.fd_const);
+  }
+
+  // TIMELINE SCOPE
+
+#ifdef GUI
+  pipebuf<float> p_tscount(&sch, "packet counter", BUF_PACKETS*100);
+  itemcounter<tspacket,float> r_tscounter(&sch, p_tspackets, p_tscount);
+  float max_packet_rate = cfg.Fm / 8 / 204;
+  float pixel_rate = cfg.Fs / demod.meas_decimation;
+  float max_packets_per_pixel = max_packet_rate / pixel_rate;
+
+  slowmultiscope<f32>::chanspec chans[] = {
+    { &p_freq, "estimated frequency", "%3.3f kHz", {0,255,255},
+      cfg.Fs*1e-3f,
+      (cfg.Ftune-cfg.Fm/2)*1e-3f, (cfg.Ftune+cfg.Fm/2)*1e-3f,
+      slowmultiscope<f32>::chanspec::WRAP },
+    { &p_tscount, "TS recovery", "%3.0f %%", {255,255,0},
+      110/max_packets_per_pixel, 0, 101,
+      (slowmultiscope<f32>::chanspec::flag)
+      (slowmultiscope<f32>::chanspec::ASYNC |
+       slowmultiscope<f32>::chanspec::SUM) },
+  };
+
+  if ( cfg.gui ) {
+    slowmultiscope<f32> *r_scope_timeline =
+      new slowmultiscope<f32>(&sch, chans, sizeof(chans)/sizeof(chans[0]),
+			      "timeline");
+    r_scope_timeline->sample_freq = cfg.Fs / demod.meas_decimation;
+    unsigned long nsamples = cfg.duration * cfg.Fs / demod.meas_decimation;
+    r_scope_timeline->samples_per_pixel = (nsamples+w_timeline)/w_timeline;
+  }
+#endif  // GUI
+
+  if ( cfg.debug )
+    fprintf(stderr,
+	    "Output:\n"
+	    "  '_': packet received without errors\n"
+	    "  '.': error-corrected packet\n"
+	    "  '!': packet with remaining errors\n");
+    
+  sch.run();
+
+  sch.shutdown();
+
+  if ( cfg.verbose ) sch.dump();
+  
+  if ( cfg.gui && cfg.linger ) while ( 1 ) { sch.run(); usleep(10000); }
+
+  return 0;
+}
+
+
 // Command-line
  
 void usage(const char *name, FILE *f, int c) {
@@ -553,7 +790,9 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --u8           Input format is 8-bit unsigned (rtl_sdr, default)\n"
 	  "  --f32          Input format is 32-bit float (gqrx)\n"
 	  "  -f HZ          Input sample rate (default: 2.4e6)\n"
-	  "  --loop         Repeat (stdin must be a file)\n");
+	  "  --loop         Repeat (stdin must be a file)\n"
+	  "  --inbuf N      Additional input buffering (samples)\n"
+	  );
   fprintf(f,
 	  "\nPreprocessing options:\n"
 	  "  --anf N        Number of birdies to remove (default: 1)\n"
@@ -576,7 +815,13 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
 	  "  --viterbi      Use Viterbi (CPU-intensive)\n"
 	  "  --hard-metric  Use Hamming distances with Viterbi\n"
-	  "  --hq           Enable all CPU-intensive features\n"
+	  );
+  fprintf(f,
+	  "\nGeneral options:\n"
+	  "  --hq           Maximize sensitivity\n"
+	  "                 (Enables all CPU-intensive features)\n"
+	  "  --hs           Maximize thoughput (QPSK CR1/2 only)\n"
+	  "                 (Disables all preprocessing)\n"
 	  );
   fprintf(f,
 	  "\nUI options:\n"
@@ -588,7 +833,7 @@ void usage(const char *name, FILE *f, int c) {
 	  );
 #ifdef GUI
   fprintf(f,
-	  "  --gui          Show constellation and spectrum\n"
+	  "  --gui          Show constellation and spectrum (X11)\n"
 	  "  --duration S   Width of timeline plot (default: 60)\n"
 	  "  --linger       Keep GUI running after EOF\n"
 	  );
@@ -598,6 +843,7 @@ void usage(const char *name, FILE *f, int c) {
 	  );
   exit(c);
 }
+
 
 int main(int argc, const char *argv[]) {
   config cfg;
@@ -676,6 +922,8 @@ int main(int argc, const char *argv[]) {
       cfg.rrc = true;
       cfg.cnr = true;
     }
+    else if ( ! strcmp(argv[i], "--hs") )
+      cfg.highspeed = true;
     else if ( ! strcmp(argv[i], "--anf") && i+1<argc )
       cfg.anf = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--cnr") )
@@ -698,6 +946,8 @@ int main(int argc, const char *argv[]) {
       cfg.float_scale = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--loop") )
       cfg.loop_input = true;
+    else if ( ! strcmp(argv[i], "--inbuf")  && i+1<argc )
+      cfg.input_buffer = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--derotate") && i+1<argc )
       cfg.Fderot = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--fd-pp") && i+1<argc )
@@ -712,5 +962,8 @@ int main(int argc, const char *argv[]) {
       usage(argv[0], stderr, 1);
   }
 
-  return run(cfg);
+  if ( cfg.highspeed )
+    return run_highspeed(cfg);
+  else
+    return run(cfg);
 }
