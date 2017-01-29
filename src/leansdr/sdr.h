@@ -12,6 +12,7 @@ namespace leansdr {
   
   typedef unsigned char u8;
   typedef unsigned short u16;
+  typedef unsigned long u32;
   typedef signed char s8;
   typedef float f32;
   
@@ -632,6 +633,258 @@ namespace leansdr {
   };
  
   
+  // FAST QPSK RECEIVER
+
+  // Optimized for u8 input, no AGC, uses phase information only.
+  // Outputs hard symbols.
+
+  template<typename T>
+  struct fast_qpsk_receiver : runnable {
+    typedef u8 hardsymbol;
+    unsigned long meas_decimation;      // Measurement rate
+    float omega, min_omega, max_omega;  // Samples per symbol
+    signed long freqw, min_freqw, max_freqw;  // Freq offs (angle per sample)
+    bool allow_drift;                   // Follow carrier beyond safe limits
+    static const unsigned int chunk_size = 128;
+    
+    fast_qpsk_receiver(scheduler *sch,
+		       pipebuf< complex<T> > &_in,
+		       pipebuf<hardsymbol> &_out,
+		       pipebuf<float> *_freq_out=NULL,
+		       pipebuf< complex<T> > *_cstln_out=NULL)
+      : runnable(sch, "Fast QPSK receiver"),
+	meas_decimation(1048576),
+	allow_drift(false),
+	in(_in), out(_out, chunk_size),
+	mu(0), phase(0),
+	meas_count(0)
+    {
+      set_omega(1);
+      set_freq(0);
+      freq_out = _freq_out ? new pipewriter<float>(*_freq_out) : NULL;
+      cstln_out = _cstln_out ? new pipewriter< complex<T> >(*_cstln_out) : NULL;
+      memset(hist, 0, sizeof(hist));
+      init_lookup_tables();
+    }
+    
+    void set_omega(float _omega, float tol=10e-6) {
+      omega = _omega;
+      min_omega = omega * (1-tol);
+      max_omega = omega * (1+tol);
+      update_freq_limits();
+    }
+    
+    void set_freq(float freq) {
+      freqw = freq * 65536;
+      update_freq_limits();
+    }
+
+    void update_freq_limits() {
+      // Prevent PLL from locking at +-symbolrate/4.
+      // TODO The +-SR/8 limit is suitable for QPSK only.
+      min_freqw = freqw - 65536/max_omega/8;
+      max_freqw = freqw + 65536/max_omega/8;
+    }
+
+    static const int RLUT_BITS = 8;
+    static const int RLUT_ANGLES = 1 << RLUT_BITS;
+
+    void run() {
+      // Magic constants that work with the qa recordings.
+      signed long freq_alpha = 0.04 * 65536;
+      signed long freq_beta = 0.0012 * 256 * 65536 / omega;
+      if ( ! freq_beta ) fail("Excessive oversampling");
+
+      float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
+      
+      int max_meas = chunk_size/meas_decimation + 1;
+      // Largin margin on output_size because mu adjustments
+      // can lead to more than chunk_size/min_omega symbols.
+      while ( in.readable() >= chunk_size+1 &&  // +1 for interpolation
+	      out.writable() >= chunk_size &&
+	      ( !freq_out  || freq_out ->writable()>=max_meas ) &&
+	      ( !cstln_out || cstln_out->writable()>=max_meas ) ) {
+	
+	complex<T> *pin=in.rd(), *pin0=pin, *pend=pin+chunk_size;
+	hardsymbol *pout=out.wr(), *pout0=pout;
+
+	cu8 s;
+	u_angle symbol_arg = 0;  // Exported for constellation viewer
+	
+	while ( pin < pend ) {
+	  // Here mu is the time of the next symbol counted from 0 at pin.
+	  if ( mu < 1 ) {
+	    // Here 0<=mu<1 is the fractional time of the next symbol
+	    // between pin and pin+1.
+
+	    // Derotate and interpolate
+#if 0  // Phase only (does not work)
+	    // Careful with the float/signed/unsigned casts
+	    u_angle a0 = fast_arg(pin[0]) - phase;
+	    u_angle a1 = fast_arg(pin[1]) - (phase+freqw);
+	    s_angle da = a1 - a0;
+	    symbol_arg = a0 + (s_angle)(da*mu);
+	    s = arg_to_symbol(symbol_arg);
+#elif 1  // Linear by lookup-table. 1.2M on bench3bishs
+	    polar *p0 = &lut_polar[pin[0].re][pin[0].im];
+	    u_angle a0 = (u_angle)(p0->a-phase) >> (16-RLUT_BITS);
+	    cu8 *p0r = &lut_rect[a0][p0->r>>1];
+	    polar *p1 = &lut_polar[pin[1].re][pin[1].im];
+	    u_angle a1 = (u_angle)(p1->a-(phase+freqw)) >> (16-RLUT_BITS);
+	    cu8 *p1r = &lut_rect[a1][p1->r>>1];
+	    s.re = (int)(p0r->re + (p1r->re-p0r->re)*mu);
+	    s.im = (int)(p0r->im + (p1r->im-p0r->im)*mu);
+	    symbol_arg = fast_arg(s);
+#else  // Linear floating-point, for reference
+	    float cosph, sinph;
+	    sincosf(-(int)phase*M_PI/32768, &sinph, &cosph);
+	    complex<float>
+	      p0r(((float)pin[0].re-128)*cosph - ((float)pin[0].im-128)*sinph,
+		  ((float)pin[0].re-128)*sinph + ((float)pin[0].im-128)*cosph);
+	    sincosf(-(int)(phase+freqw)*M_PI/32768, &sinph, &cosph);
+	    complex<float>
+	      p1r(((float)pin[1].re-128)*cosph - ((float)pin[1].im-128)*sinph,
+		  ((float)pin[1].re-128)*sinph + ((float)pin[1].im-128)*cosph);
+	    s.re = (int)(128 + p0r.re + (p1r.re-p0r.re)*mu);
+	    s.im = (int)(128 + p0r.im + (p1r.im-p0r.im)*mu);
+	    symbol_arg = fast_arg(s);
+#endif
+
+	    int quadrant = symbol_arg >> 14;
+	    static unsigned char quadrant_to_symbol[4] = { 0, 2, 3, 1 };
+	    *pout = quadrant_to_symbol[quadrant];
+	    ++pout;
+
+	    // PLL
+	    s_angle phase_error = (s_angle)(symbol_arg&16383) - 8192;
+	    phase += (phase_error * freq_alpha + 32768) >> 16;
+	    freqw += (phase_error * freq_beta + 32768*256) >> 24;
+	    
+	    // Modified Mueller and Müller
+	    // mu[k]=real((c[k]-c[k-2])*conj(p[k-1])-(p[k]-p[k-2])*conj(c[k-1]))
+	    //      =dot(c[k]-c[k-2],p[k-1]) - dot(p[k]-p[k-2],c[k-1])
+	    // p = received signals
+	    // c = decisions (constellation points)
+	    hist[2] = hist[1];
+	    hist[1] = hist[0];
+#define HIST_FLOAT 0
+#if HIST_FLOAT
+	    hist[0].p.re = (float)s.re - 128;
+	    hist[0].p.im = (float)s.im - 128;
+
+	    cu8 cp = arg_to_symbol((symbol_arg&49152)+8192);
+	    hist[0].c.re = (float)cp.re - 128;
+	    hist[0].c.im = (float)cp.im - 128;
+
+	    float muerr =
+	      ( (hist[0].p.re-hist[2].p.re)*hist[1].c.re +
+		(hist[0].p.im-hist[2].p.im)*hist[1].c.im ) -
+	      ( (hist[0].c.re-hist[2].c.re)*hist[1].p.re +
+		(hist[0].c.im-hist[2].c.im)*hist[1].p.im );
+#else
+	    hist[0].p = s;
+	    hist[0].c = arg_to_symbol((symbol_arg&49152)+8192);
+
+	    int muerr =
+	      ( (signed char)(hist[0].p.re-hist[2].p.re)*((int)hist[1].c.re-128) +
+		(signed char)(hist[0].p.im-hist[2].p.im)*((int)hist[1].c.im-128) ) -
+	      ( (signed char)(hist[0].c.re-hist[2].c.re)*((int)hist[1].p.re-128) +
+		(signed char)(hist[0].c.im-hist[2].c.im)*((int)hist[1].p.im-128) );
+#endif
+	    float mucorr = muerr * gain_mu;
+	    const float max_mucorr = 0.1;
+	    // TBD Optimize out statically
+	    if ( mucorr < -max_mucorr ) mucorr = -max_mucorr;
+	    if ( mucorr >  max_mucorr ) mucorr =  max_mucorr;
+	    mu += mucorr;
+	    mu += omega;  // Next symbol time;
+	  } // mu<1
+	  
+	  // Next sample
+	  ++pin;
+	  --mu;
+	  phase += freqw;
+	}  // chunk_size
+	
+	in.read(pin-pin0);
+	out.written(pout-pout0);
+
+	if ( symbol_arg && cstln_out ) {
+	  // Output the last interpolated PSK symbol, max once per chunk_size
+	  *cstln_out->wr() = s;
+	  cstln_out->written(1);
+	}
+	
+	// This is best done periodically ouside the inner loop,
+	// but will cause non-deterministic output.
+	
+	if ( ! allow_drift ) {
+	  if ( freqw < min_freqw || freqw > max_freqw )
+	    freqw = (max_freqw+min_freqw) / 2;
+	}
+      
+	// Output measurements
+	
+	meas_count += pin-pin0;
+	while ( meas_count >= meas_decimation ) {
+	  meas_count -= meas_decimation;
+	  if ( freq_out ) {
+	    *freq_out->wr() = (float)freqw / 65536;
+	    freq_out->written(1);
+	  }
+	}
+	
+      }  // Work to do
+  }
+    
+  private:
+
+    struct polar { u_angle a; unsigned char r; } lut_polar[256][256];
+    u_angle fast_arg(const cu8 &c) {
+      // TBD read cu8 as u16 index, same endianness as in init()
+      return lut_polar[c.re][c.im].a;
+    }
+    cu8 lut_rect[RLUT_ANGLES][256];
+    cu8 lut_sincos[65536];
+    cu8 arg_to_symbol(u_angle a) { return lut_sincos[a]; }
+    void init_lookup_tables() {
+      for ( int i=0; i<256; ++i )
+	for ( int q=0; q<256; ++q ) {
+	  // Don't cast float to unsigned directly
+	  lut_polar[i][q].a = (s_angle)(atan2f(q-128,i-128)*65536/(2*M_PI));
+	  lut_polar[i][q].r = (int)hypotf(i-128,q-128);
+	}
+      for ( unsigned long a=0; a<65536; ++a ) {
+	float f = 2*M_PI * a / 65536;
+	lut_sincos[a].re = 128 + cstln_amp*cosf(f);
+	lut_sincos[a].im = 128 + cstln_amp*sinf(f);
+      }
+      for ( int a=0; a<RLUT_ANGLES; ++a )
+	for ( int r=0; r<256; ++r ) {
+	  lut_rect[a][r].re = (int)(128 + r*cos(2*M_PI*a/RLUT_ANGLES));
+	  lut_rect[a][r].im = (int)(128 + r*sin(2*M_PI*a/RLUT_ANGLES));
+	}
+    }
+
+    struct {
+#if HIST_FLOAT
+      complex<float> p;  // Received symbol
+      complex<float> c;  // Matched constellation point
+#else
+      cu8 p;  // Received symbol
+      cu8 c;  // Matched constellation point
+#endif
+    } hist[3];
+    pipereader<cu8> in;
+    pipewriter<hardsymbol> out;
+    float mu;  // PSK time expressed in clock ticks. TBD fixed point.
+    u_angle phase;
+    unsigned long meas_count;
+    pipewriter<float> *freq_out, *mer_out;
+    pipewriter<cu8> *cstln_out;
+  };  // fast_qpsk_receiver
+  
+
   // FREQUENCY SHIFTER
 
   // Resolution is sample_freq/65536.
