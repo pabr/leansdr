@@ -652,8 +652,7 @@ namespace leansdr {
     void run() {
       if ( report_state && state_out && state_out->writable()>=1 ) {
 	// Report unlocked state on first invocation.
-	*state_out->wr() = 0;
-	state_out->written(1);
+	state_out->write(0);
 	report_state = false;
       }
       if ( synchronized )
@@ -742,10 +741,8 @@ namespace leansdr {
 	  synchronized = true;
 	  lock_timeleft = lock_timeout;
 	  locktime = 0;
-	  if ( state_out ) {
-	    *state_out->wr() = 1;
-	    state_out->written(1);
-	  }
+	  if ( state_out )
+	    state_out->write(1);
 	  return true;
 	}
       }
@@ -768,10 +765,8 @@ namespace leansdr {
 	Tbyte syncbyte = *out.wr();
 	out.written(SIZE_RSPACKET);
 	++locktime;
-	if ( locktime_out ) {
-	  *locktime_out->wr() = locktime;
-	  locktime_out->written(1);
-	}
+	if ( locktime_out )
+	  locktime_out->write(locktime);
 	// Reset timer if sync byte is correct
 	Tbyte expected = phase8 ? MPEG_SYNC : MPEG_SYNC_INV;
 	if ( syncbyte == expected ) lock_timeleft = lock_timeout;
@@ -781,10 +776,8 @@ namespace leansdr {
 	  if ( sch->debug ) fprintf(stderr, "Unlocked\n");
 	  synchronized = false;
 	  next_sync_count = 0;
-	  if ( state_out ) {
-	    *state_out->wr() = 0;
-	    state_out->written(1);
-	  }
+	  if ( state_out )
+	    state_out->write(0);
 	  return;
 	}
       }
@@ -964,8 +957,8 @@ namespace leansdr {
 
       }
       if ( nbits ) {
-	if ( bitcount ) { *bitcount->wr()=nbits; bitcount->written(1); }
-	if ( errcount ) { *errcount->wr()=nerrs; errcount->written(1); }
+	if ( bitcount ) bitcount->write(nbits);
+	if ( errcount ) errcount->write(nerrs);
       }
     }
   private:
@@ -1169,9 +1162,8 @@ namespace leansdr {
 	      byte = (byte<<1) | bit;
 	    }
 	  }
-	  *out.wr() = byte;
 	  in.read(8);
-	  out.written(1);
+	  out.write(byte);
 	}  // chunk_size
 	if ( ! resync_phase ) {
 	  // Switch to another decoder ?

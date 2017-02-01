@@ -152,9 +152,8 @@ struct itemcounter : runnable {
     if ( out.writable() < 1 ) return;
     unsigned long count = in.readable();
     if ( ! count ) return;
-    *out.wr() = count;
+    out.write(count);
     in.read(count);
-    out.written(1);
   }
 private:
   pipereader<Tin> in;
@@ -212,8 +211,7 @@ private:
       num.read(count);
       den.read(count);
       if ( acc_den >= sample_size ) {
-	*rate.wr() = (float)acc_num / acc_den;
-	rate.written(1);
+	rate.write((float)acc_num / acc_den);
 	acc_num = acc_den = 0;
       }
     }
