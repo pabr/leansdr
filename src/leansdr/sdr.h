@@ -35,7 +35,7 @@ namespace leansdr {
 	       pipebuf< complex<T> > &_out, int _nslots,
 	       T _agc_rms_setpoint)
       : runnable(sch, "auto_notch"),
-	decimation(1024), k(0.002),   // k(0.01)
+	decimation(1024*4096), k(0.002),   // k(0.01)
 	fft(4096),
 	in(_in), out(_out,fft.n),
 	nslots(_nslots), slots(new slot[nslots]),
@@ -47,8 +47,11 @@ namespace leansdr {
     }
     void run() {
       while ( in.readable()>=fft.n && out.writable()>=fft.n ) {
-	if ( ! phase ) detect();
-	if ( ++phase >= decimation ) phase = 0;
+	phase += fft.n;
+	if ( phase >= decimation ) {
+	  phase -= decimation;
+	  detect();
+	}
 	process();
 	in.read(fft.n);
 	out.written(fft.n);
@@ -145,13 +148,15 @@ namespace leansdr {
     unsigned long decimation;  // Output rate
     ss_estimator(scheduler *sch, pipebuf< complex<T> > &_in, pipebuf<T> &_out)
       : runnable(sch, "SS estimator"),
-	window_size(1024), decimation(1), 
+	window_size(1024), decimation(1024),
 	in(_in), out(_out),
 	phase(0) {
     }
     void run() {
       while ( in.readable()>=window_size && out.writable()>=1 ) {
-	if ( ! phase ) {
+	phase += window_size;
+	if ( phase >= decimation ) {
+	  phase -= decimation;
 	  complex<T> *p=in.rd(), *pend=p+window_size;
 	  float s = 0;
 	  for ( ; p<pend; ++p )
@@ -160,7 +165,6 @@ namespace leansdr {
 	  out.written(1);
 	}
 	in.read(window_size);
-	if ( ++phase >= decimation ) phase = 0;
       }
     }
   private:  
@@ -986,10 +990,12 @@ namespace leansdr {
 
     void run() {
       while ( in.readable()>=fft.n && out.writable()>=1 ) {
-	if ( ! phase ) do_cnr();
-	in.read(fft.n);
 	phase += fft.n;
-	if ( phase >= decimation ) phase = 0;
+	if ( phase >= decimation ) {
+	  phase -= decimation;
+	  do_cnr();
+	}
+	in.read(fft.n);
       }
     }
     
