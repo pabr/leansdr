@@ -74,27 +74,34 @@ private:
 template<typename T>
 struct file_printer : runnable {
   file_printer(scheduler *sch, const char *_format,
-	      pipebuf<T> &_in, int _fdout) :
+	       pipebuf<T> &_in, int _fdout,
+	       int _decimation=1) :
     runnable(sch, _in.name),
-    scale(1), in(_in), format(_format), fdout(_fdout) {
+    scale(1), decimation(_decimation),
+    in(_in), format(_format), fdout(_fdout), phase(0) {
   }
   void run() {
     int n = in.readable();
     T *pin=in.rd(), *pend=pin+n;
     for ( ; pin<pend; ++pin ) {
-      char buf[256];
-      int len = snprintf(buf, sizeof(buf), format, (*pin)*scale);
-      if ( len < 0 ) fatal("obsolete glibc");
-      int nw = write(fdout, buf, len);
-      if ( nw != len ) fatal("partial write");
+      if ( ++phase >= decimation ) {
+	phase -= decimation;
+	char buf[256];
+	int len = snprintf(buf, sizeof(buf), format, (*pin)*scale);
+	if ( len < 0 ) fatal("obsolete glibc");
+	int nw = write(fdout, buf, len);
+	if ( nw != len ) fatal("partial write");
+      }
     }
     in.read(n);
   }
   T scale;
+  int decimation;
 private:
   pipereader<T> in;
   const char *format;
   int fdout;
+  int phase;
 };
 
 // [file_listprinter] writes all data available from a [pipebuf]
