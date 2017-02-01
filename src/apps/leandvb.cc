@@ -814,7 +814,7 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --resample-rej K  Aliasing rejection (default: 10)\n"
 	  "  --decim N      Decimate baseband (causes aliasing)\n"
 	  "  --roll-off A   Roll-off (default: 0.35)\n"
-	  "  --cnr          Measure CNR (CPU-intensive)\n"
+	  "  --cnr          Measure CNR (requires samplerate>3*symbolrate)\n"
 	  "  --fd-pp NUM    Dump preprocessed IQ data to file descriptor\n"
 	  );
   fprintf(f,
@@ -933,7 +933,6 @@ int main(int argc, const char *argv[]) {
       cfg.viterbi = true;
       cfg.resample = true;
       cfg.rrc = true;
-      cfg.cnr = true;
     }
     else if ( ! strcmp(argv[i], "--hs") )
       cfg.highspeed = true;
