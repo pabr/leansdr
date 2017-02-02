@@ -161,8 +161,7 @@ namespace leansdr {
 	  float s = 0;
 	  for ( ; p<pend; ++p )
 	    s += (float)p->re*p->re + (float)p->im*p->im;
-	  *out.wr() = sqrtf(s/window_size);
-	  out.written(1);
+	  out.write(sqrtf(s/window_size));
 	}
 	in.read(window_size);
       }
@@ -537,10 +536,8 @@ namespace leansdr {
 	if ( cstln_point ) {
 	  
 	  // Output the last interpolated PSK symbol, max once per chunk_size
-	  if ( cstln_out ) {
-	    *cstln_out->wr() = s;
-	    cstln_out->written(1);
-	  }
+	  if ( cstln_out )
+	    cstln_out->write(s);
 	
 	  // AGC
 	  // For APSK we must do AGC on the symbols, not the whole signal.
@@ -586,20 +583,12 @@ namespace leansdr {
 	meas_count += pin-pin0;
 	while ( meas_count >= meas_decimation ) {
 	  meas_count -= meas_decimation;
-	  if ( freq_out ) {
-	    *freq_out->wr() = freq_tap;
-	    freq_out->written(1);
-	  }
-	  if ( ss_out ) {
-	    *ss_out->wr() = sqrtf(est_insp);
-	    ss_out->written(1);
-	  }
-	  if ( mer_out ) {
-	    float mer = est_ep ? 10*logf(est_sp/est_ep)/logf(10) : 0;
-	    *mer_out->wr() = mer;
-	    mer_out->written(1);
-	  }
-	  
+	  if ( freq_out )
+	    freq_out->write(freq_tap);
+	  if ( ss_out )
+	    ss_out->write(sqrtf(est_insp));
+	  if ( mer_out )
+	    mer_out->write(est_ep ? 10*logf(est_sp/est_ep)/logf(10) : 0);
 	}
 	
       }  // Work to do
@@ -813,11 +802,9 @@ namespace leansdr {
 	in.read(pin-pin0);
 	out.written(pout-pout0);
 
-	if ( symbol_arg && cstln_out ) {
+	if ( symbol_arg && cstln_out )
 	  // Output the last interpolated PSK symbol, max once per chunk_size
-	  *cstln_out->wr() = s;
-	  cstln_out->written(1);
-	}
+	  cstln_out->write(s);
 	
 	// This is best done periodically ouside the inner loop,
 	// but will cause non-deterministic output.
@@ -832,10 +819,8 @@ namespace leansdr {
 	meas_count += pin-pin0;
 	while ( meas_count >= meas_decimation ) {
 	  meas_count -= meas_decimation;
-	  if ( freq_out ) {
-	    *freq_out->wr() = (float)freqw / 65536;
-	    freq_out->written(1);
-	  }
+	  if ( freq_out )
+	    freq_out->write((float)freqw / 65536);
 	}
 	
       }  // Work to do
@@ -1026,8 +1011,7 @@ namespace leansdr {
 		   avgslots(icf+bwslots*2, icf+bwslots*3) ) / 2;
       float c2 = c2plusn2 - n2;
       float cnr = (c2>0 && n2>0) ? 10 * logf(c2/n2)/logf(10) : -50;
-      *out.wr() = cnr;
-      out.written(1);
+      out.write(cnr);
     }
 
     float avgslots(int i0, int i1) {  // i0 <= i1
