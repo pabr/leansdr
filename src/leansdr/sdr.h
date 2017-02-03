@@ -171,6 +171,50 @@ namespace leansdr {
     pipewriter<T> out;
     unsigned long phase;
   };
+
+  template<typename T>
+  struct ss_amp_estimator : runnable {
+    unsigned long window_size;  // Samples per estimation
+    unsigned long decimation;  // Output rate
+    ss_amp_estimator(scheduler *sch, pipebuf< complex<T> > &_in,
+		     pipebuf<T> &_out_ss,
+		     pipebuf<T> &_out_ampmin, pipebuf<T> &_out_ampmax)
+      : runnable(sch, "SS estimator"),
+	window_size(1024), decimation(1024),
+	in(_in), out_ss(_out_ss),
+	out_ampmin(_out_ampmin), out_ampmax(_out_ampmax),
+	phase(0) {
+    }
+    void run() {
+      while ( in.readable() >= window_size &&
+	      out_ss.writable() >= 1 &&
+	      out_ampmin.writable() >= 1 &&
+	      out_ampmax.writable() >= 1 ) {
+	phase += window_size;
+	if ( phase >= decimation ) {
+	  phase -= decimation;
+	  complex<T> *p=in.rd(), *pend=p+window_size;
+	  float s2 = 0;
+	  float amin=1e99, amax=0;
+	  for ( ; p<pend; ++p ) {
+	    float mag2 = (float)p->re*p->re + (float)p->im*p->im;
+	    s2 += mag2;
+	    float mag = sqrtf(mag2);
+	    if ( mag < amin ) amin = mag;
+	    if ( mag > amax ) amax = mag;
+	  }
+	  out_ss.write(sqrtf(s2/window_size));
+	  out_ampmin.write(amin);
+	  out_ampmax.write(amax);
+	}
+	in.read(window_size);
+      }
+    }
+  private:  
+    pipereader< complex<T> > in;
+    pipewriter<T> out_ss, out_ampmin, out_ampmax;
+    unsigned long phase;
+  };
   
   typedef unsigned short u_angle;  //  [0,2PI[ in 65536 steps
   typedef signed short s_angle;  // [-PI,PI[ in 65536 steps
