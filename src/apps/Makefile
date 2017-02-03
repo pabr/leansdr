@@ -1,4 +1,5 @@
-APPS	= leandvb leansdrscan leansdrcat
+APPS	= leandvb leansdrscan
+APPS	+= leansdrcat leantsgen leanchansim leandvbtx
 
 all:	$(APPS)
 
