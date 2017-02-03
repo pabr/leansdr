@@ -838,7 +838,7 @@ void usage(const char *name, FILE *f, int c) {
 	  "\nGeneral options:\n"
 	  "  --hq           Maximize sensitivity\n"
 	  "                 (Enables all CPU-intensive features)\n"
-	  "  --hs           Maximize thoughput (QPSK CR1/2 only)\n"
+	  "  --hs           Maximize throughput (QPSK CR1/2 only)\n"
 	  "                 (Disables all preprocessing)\n"
 	  );
   fprintf(f,
