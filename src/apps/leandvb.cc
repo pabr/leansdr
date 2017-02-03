@@ -267,7 +267,11 @@ int run(config &cfg) {
     pipebuf<cf32> *p_resampled =
       new pipebuf<cf32>(&sch, "resampled", BUF_BASEBAND);
     float *coeffs;
+#if 0  // Cut in middle of roll-off region
     float Fcut = (cfg.Fm/2) * (1+cfg.rolloff/2) / cfg.Fs;
+#else  // Cut at beginning of roll-off region
+    float Fcut = (cfg.Fm/2) / cfg.Fs;
+#endif
     int ncoeffs = filtergen::lowpass(order, Fcut, &coeffs);
     filtergen::normalize_dcgain(ncoeffs, coeffs, 1);
     if ( cfg.debug ) {
