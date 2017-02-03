@@ -187,8 +187,22 @@ namespace leansdr {
       buf.wr += n;
       buf.total_written += n;
     }
+    void write(const T &e) {
+      *wr() = e;
+      written(1);
+    }
   };
-  
+
+  template<typename T>
+  pipewriter<T> *opt_writer(pipebuf<T> *buf) {
+    return buf ? new pipewriter<T>(*buf) : NULL;
+  }
+
+  template<typename T>
+  bool opt_writable(pipewriter<T> *p, int n=1) {
+    return (p==NULL) || p->writable()>=n;
+  }
+
   template<typename T>
   struct pipereader {
     pipebuf<T> &buf;
