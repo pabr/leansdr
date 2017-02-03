@@ -7,11 +7,19 @@ namespace leansdr {
   namespace filtergen {
   
     template<typename T>
-    void normalize_coeffs(int n, T *coeffs, float gain=1) {
-      T s = 0;
+    void normalize_power(int n, T *coeffs, float gain=1) {
+      float s2 = 0;
+      for ( int i=0; i<n; ++i ) s2 = s2 + coeffs[i]*coeffs[i];  // TBD complex
+      if ( s2 ) gain /= gen_sqrt(s2);
+      for ( int i=0; i<n; ++i ) coeffs[i] = coeffs[i] * gain;
+    }
+
+    template<typename T>
+    void normalize_dcgain(int n, T *coeffs, float gain=1) {
+      float s = 0;
       for ( int i=0; i<n; ++i ) s = s + coeffs[i];
-      T k = (T)gain / s;
-      for ( int i=0; i<n; ++i ) coeffs[i] = coeffs[i] * k;
+      if ( s ) gain /= s;
+      for ( int i=0; i<n; ++i ) coeffs[i] = coeffs[i] * gain;
     }
 
     // Generate coefficients for a sinc filter.
@@ -31,7 +39,7 @@ namespace leansdr {
 #endif
 	(*coeffs)[i] = sinc * window;
       }
-      normalize_coeffs(ncoeffs, *coeffs, gain);
+      normalize_dcgain(ncoeffs, *coeffs, gain);
       return ncoeffs;
     }
     
