@@ -1,4 +1,8 @@
 HEAD
+  * Added benchmarking/test suite (test/leandvb_bench.sh)
+  * Added tools for benchmarking: leantsgen, leandvbtx, leanchansim.
+  * Added LOCKTIME output with --fd-info.
+  * Added --hs mode (high throughput for raw u8 QPSK 1/2).
   * Added --drift.
   * Filters follow --drift.
   * Added --float-scale.
@@ -6,6 +10,7 @@ HEAD
   * Renamed --probesize (was --maxsend).
   * Added --viterbi.
   * Added VBER (bit error rate after deconvolution, detected by RS).
+  * Added FFT-based CNR estimator.
 
 2016-09-16 v1.1.0
   * Support for DVB-S2 constellations (not FEC).
