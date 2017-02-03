@@ -269,8 +269,9 @@ int run(config &cfg) {
     float *coeffs;
     float Fcut = (cfg.Fm/2) * (1+cfg.rolloff/2) / cfg.Fs;
     int ncoeffs = filtergen::lowpass(order, Fcut, &coeffs);
+    filtergen::normalize_dcgain(ncoeffs, coeffs, 1);
     if ( cfg.debug ) {
-      for ( int i=0; i<order; ++i ) fprintf(stderr, "%f, ", coeffs[i]);
+      for ( int i=0; i<ncoeffs; ++i ) fprintf(stderr, "%f, ", coeffs[i]);
       fprintf(stderr, "\n");
     }
     r_resample = new fir_filter<cf32,float>
