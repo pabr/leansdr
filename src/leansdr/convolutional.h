@@ -87,10 +87,10 @@ namespace leansdr {
 	  u8 iq = remap[SYMVAL(pin)];
 	  histI = (histI<<1) | (iq>>1);
 	  histQ = (histQ<<1) | (iq&1);
-	  if ( POLY_DECONVOL & (2UL<<(2*bit)) ) wd ^= histI;
-	  if ( POLY_DECONVOL & (1UL<<(2*bit)) ) wd ^= histQ;
-	  if ( POLY_ERRORS   & (2UL<<(2*bit)) ) wp ^= histI;
-	  if ( POLY_ERRORS   & (1UL<<(2*bit)) ) wp ^= histQ;
+	  if ( POLY_DECONVOL & (2ULL<<(2*bit)) ) wd ^= histI;
+	  if ( POLY_DECONVOL & (1ULL<<(2*bit)) ) wd ^= histQ;
+	  if ( POLY_ERRORS   & (2ULL<<(2*bit)) ) wp ^= histI;
+	  if ( POLY_ERRORS   & (1ULL<<(2*bit)) ) wp ^= histQ;
 	}
 #else
 	// Unroll manually.
@@ -98,10 +98,10 @@ namespace leansdr {
 	  u8 iq = remap[SYMVAL(pin)];				\
 	  histI = (histI<<1) | (iq>>1);				\
 	  histQ = (histQ<<1) | (iq&1);				\
-	  if ( POLY_DECONVOL & (2UL<<(2*bit)) ) wd ^= histI;	\
-	  if ( POLY_DECONVOL & (1UL<<(2*bit)) ) wd ^= histQ;	\
-	  if ( POLY_ERRORS   & (2UL<<(2*bit)) ) wp ^= histI;	\
-	  if ( POLY_ERRORS   & (1UL<<(2*bit)) ) wp ^= histQ;	\
+	  if ( POLY_DECONVOL & (2ULL<<(2*bit)) ) wd ^= histI;	\
+	  if ( POLY_DECONVOL & (1ULL<<(2*bit)) ) wd ^= histQ;	\
+	  if ( POLY_ERRORS   & (2ULL<<(2*bit)) ) wp ^= histI;	\
+	  if ( POLY_ERRORS   & (1ULL<<(2*bit)) ) wp ^= histQ;	\
 	  ++pin;						\
 	}
 	LOOP(31); LOOP(30); LOOP(29); LOOP(28); 
