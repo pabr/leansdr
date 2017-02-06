@@ -481,7 +481,7 @@ namespace leansdr {
       
       // Magic constants that work with the qa recordings.
       signed long freq_alpha = 0.04 * 65536;
-      signed long freq_beta = 0.0002 * 65536 / omega;
+      signed long freq_beta = 0.0012 * 65536 / omega;
       if ( ! freq_beta ) fail("Excessive oversampling");
 
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
@@ -729,7 +729,7 @@ namespace leansdr {
     void run() {
       // Magic constants that work with the qa recordings.
       signed long freq_alpha = 0.04 * 65536;
-      signed long freq_beta = 0.0002 * 256 * 65536 / omega;
+      signed long freq_beta = 0.0012 * 256 * 65536 / omega;
       if ( ! freq_beta ) fail("Excessive oversampling");
 
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
