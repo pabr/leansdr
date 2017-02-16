@@ -506,17 +506,17 @@ int run(config &cfg) {
   float max_packets_per_pixel = max_packet_rate / pixel_rate;
 
   slowmultiscope<f32>::chanspec chans[] = {
-    { &p_freq, "estimated frequency", "%3.3f kHz", {0,255,255},
+    { &p_freq, "estimated frequency", "Offset %3.3f kHz", {0,255,255},
       cfg.Fs*1e-3f,
       (cfg.Ftune-cfg.Fm/2)*1e-3f, (cfg.Ftune+cfg.Fm/2)*1e-3f,
       slowmultiscope<f32>::chanspec::WRAP },
-    { &p_ss, "signal strength", "%3.0f", {255,0,0},
+    { &p_ss, "signal strength", "SS %3.0f", {255,0,0},
       1, 0,128, 
       slowmultiscope<f32>::chanspec::DEFAULT },
-    { &p_mer, "MER", "%5.1f dB", {255,0,255},
+    { &p_mer, "MER", "MER %5.1f dB", {255,0,255},
       1, -10,20, 
       slowmultiscope<f32>::chanspec::DEFAULT },
-    { &p_cnr, "CNR", "%5.1f dB", {255,255,0},
+    { &p_cnr, "CNR", "CNR %5.1f dB", {255,255,0},
       1, -10,20, 
       (r_cnr?
        slowmultiscope<f32>::chanspec::ASYNC:
