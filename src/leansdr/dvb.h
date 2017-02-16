@@ -574,7 +574,8 @@ namespace leansdr {
     static const int NSYNCS = 4;
 
     struct sync_t {
-      deconvol_poly2<Tin, unsigned long, 0x3ba, 0x38f70> deconv;
+      deconvol_poly2<Tin, unsigned long,
+		     unsigned long long, 0x3ba, 0x38f70> deconv;
       u8 lut[4];  // TBD Swap and flip bits in the polynomials instead.
     } syncs[NSYNCS];
 
@@ -1179,7 +1180,7 @@ namespace leansdr {
       }
     }
     
-  };
+  };  // viterbi_sync
 
 }  // namespace
 
