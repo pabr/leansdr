@@ -379,7 +379,7 @@ namespace leansdr {
 	    if ( d2 > 65535 ) fail("Unexpected constellation");
 	    unsigned int d = sqrtf(d2);
 	    if ( d < dmin ) { dmin=d; smin=s; }
-	    if ( nsymbols == 4 ) {
+	    if ( nsymbols <= 4 ) {
 	      pr->ss.metrics4[s] = d2;
 	    }
 	  }
@@ -398,12 +398,18 @@ namespace leansdr {
 	for ( int q=0; q<R; ++q ) {
 	  unsigned short *m = lut[i][q].ss.metrics4;
 	  int best;
-	  if ( m[0]<=m[1] && m[0]<=m[2] && m[0]<=m[3] ) best = 0;
-	  else if ( m[1]<=m[2] && m[1]<=m[3] ) best = 1;
-	  else if ( m[2]<=m[3] ) best = 2;
-	  else best = 3;
-	  for ( int s=0; s<4; ++s )
-	    m[s] = hamming_weight((unsigned long)(s^best));
+	  if ( nsymbols == 2 ) {
+	    best = (m[0]<m[1]) ? 0 : 1;
+	    m[0] = (best==0) ? 0 : 1;
+	    m[1] = (best==1) ? 0 : 1;
+	  } else {
+	    if ( m[0]<=m[1] && m[0]<=m[2] && m[0]<=m[3] ) best = 0;
+	    else if ( m[1]<=m[2] && m[1]<=m[3] ) best = 1;
+	    else if ( m[2]<=m[3] ) best = 2;
+	    else best = 3;
+	    for ( int s=0; s<4; ++s )
+	      m[s] = hamming_weight((unsigned long)(s^best));
+	  }
 	}
     }
 

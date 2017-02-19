@@ -1146,7 +1146,7 @@ namespace leansdr {
 	  softsymbol *pin = in.rd();
 	  if ( ! resync_phase ) {
 	    // Every one in [resync_period] chunks, run all decoders
-	    // and compute averate quality metrics
+	    // and compute average quality metrics
 	    for ( int b=0; b<8; ++b,++pin ) {
 	      TUS bits[NSYNCS];
 	      for ( int s=0; s<NSYNCS; ++s ) {
@@ -1181,6 +1181,114 @@ namespace leansdr {
     }
     
   };  // viterbi_sync
+
+
+  // VITERBI DECODING - BPSK
+  // ETSI TR 101 198: The BPSK variant of DVB-S transmits R=I,Q,I,Q,...
+  // Code rate 1/2 only.
+
+  struct viterbi_sync_bpsk : runnable {
+    static const int TRACEBACK = 32;  // Suitable for BPSK 1/2
+    typedef unsigned char TS, TCS, TUS;
+    typedef unsigned short TBM;
+    typedef unsigned long TPM;
+    typedef bitpath<unsigned long,TUS,1,TRACEBACK> dvb_path;
+    typedef viterbi_dec<TS,64, TUS,2, TCS,4, TBM, TPM, dvb_path> dvb_dec;
+    typedef trellis<TS,64, TUS,2, 4> dvb_trellis;
+
+  private:
+    pipereader<softsymbol> in;
+    pipewriter<unsigned char> out;
+    static const int NSYNCS = 2;  // Alignment of symbol pairs
+    dvb_dec *syncs[2];
+    int current_sync;
+    static const int chunk_size = 128;
+    int resync_phase;
+  public:
+    int resync_period;
+
+    viterbi_sync_bpsk(scheduler *sch,
+		      pipebuf<softsymbol> &_in,
+		      pipebuf<unsigned char> &_out)
+      : runnable(sch, "viterbi_sync_bpsk"),
+	in(_in), out(_out, chunk_size),
+	current_sync(0),
+	resync_phase(0),
+	resync_period(32)
+    {
+      dvb_trellis *trell = new dvb_trellis();
+      unsigned long long dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
+      trell->init_convolutional(dvb_polynomials);
+      for ( int s=0; s<NSYNCS; ++s ) syncs[s] = new dvb_dec(trell);
+    }
+
+    inline TUS update_sync(int s, TBM mX[4], TBM mY[4], TPM *discr) {
+      // Reconstruct QPSK metrics from pairs of BPSK symbols.
+      // EN 300 421, section 4.5 Baseband shaping and modulation
+      // EN 302 307, section 5.4.1
+      //              
+      //    IQ=10=(2) | IQ=00=(0)
+      //    ----------+----------
+      //    IQ=11=(3) | IQ=01=(1)
+      //
+      TBM vm[4];
+      vm[0] = mX[0] + mY[0];
+      vm[1] = mX[0] + mY[1];
+      vm[2] = mX[1] + mY[0];
+      vm[3] = mX[1] + mY[1];
+      return syncs[s]->update(vm, discr);
+    }
+
+    void run() {
+      while ( in.readable()>=2*8*chunk_size+1 && out.writable()>=chunk_size ) {
+	unsigned long totaldiscr[NSYNCS];
+	for ( int s=0; s<NSYNCS; ++s ) totaldiscr[s] = 0;
+	for ( int bytenum=0; bytenum<chunk_size; ++bytenum ) {
+	  // Decode one byte
+	  unsigned char byte = 0;
+	  softsymbol *pin = in.rd();
+	  if ( ! resync_phase ) {
+	    // Every one in [resync_period] chunks, run all decoders
+	    // and compute average quality metrics
+	    for ( int b=0; b<8; ++b,pin+=2 ) {
+	      TUS bits[NSYNCS];
+	      for ( int s=0; s<NSYNCS; ++s ) {
+		TPM discr;
+		bits[s] = update_sync(s,
+				      (pin+s)->metrics4, (pin+s+1)->metrics4,
+				      &discr);
+		if ( bytenum*8 > TRACEBACK ) totaldiscr[s] += discr;
+	      }
+	      byte = (byte<<1) | bits[current_sync];
+	    }
+	  } else {
+	    // Otherwise run only the selected decoder
+	    for ( int b=0; b<8; ++b,pin+=2 ) {
+	      TUS bit = update_sync(current_sync,
+				    (pin+current_sync)->metrics4,
+				    (pin+current_sync+1)->metrics4, NULL);
+	      byte = (byte<<1) | bit;
+	    }
+	  }
+	  in.read(16);
+	  out.write(byte);
+	}  // chunk_size
+ 	if ( ! resync_phase ) {
+	fprintf(stderr, "bpskd %d %d\n", totaldiscr[0], totaldiscr[1]);
+	  // Switch to another decoder ?
+	  int best = current_sync;
+	  for ( int s=0; s<NSYNCS; ++s )
+	    if ( totaldiscr[s] > totaldiscr[best] ) best = s;
+	  if ( best != current_sync ) {
+	    if ( sch->debug ) fprintf(stderr, "{%d->%d}", current_sync, best);
+	    current_sync = best;
+	  }
+	}
+	if ( ++resync_phase >= resync_period ) resync_phase = 0;
+      }
+    }
+
+  };  // viterbi_sync_bpsk
 
 }  // namespace
 

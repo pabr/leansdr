@@ -350,8 +350,12 @@ int run(config &cfg) {
   // TBD retype preprocess as unsigned char
   cstln_receiver<f32> demod(&sch, *p_preprocessed, p_symbols,
 			    &p_freq, &p_ss, &p_mer, &p_sampled);
-  cstln_lut<256> qpsk(cstln_lut<256>::QPSK);
-  demod.cstln = &qpsk;
+  if ( cfg.standard == config::DVB_S ) {
+    if ( cfg.constellation != cstln_lut<256>::QPSK &&
+	 cfg.constellation != cstln_lut<256>::BPSK )
+      fail("Invalid constellation for DVB-S");
+    demod.cstln = new cstln_lut<256>(cfg.constellation);
+  }    
   if ( cfg.standard == config::DVB_S2 ) {
     // For DVB-S2 testing only.
     // Constellation should be determined from PL signalling.
@@ -417,8 +421,13 @@ int run(config &cfg) {
   if ( cfg.viterbi ) {
     if ( cfg.fec != FEC12 )
       fail("Viterbi only for code rate 1/2");
-    viterbi_sync *r_viterbi = new viterbi_sync(&sch, p_symbols, p_bytes);
-    if ( cfg.fastlock ) r_viterbi->resync_period = 1;
+    if ( cfg.constellation == cstln_lut<256>::QPSK ) {
+      viterbi_sync *r = new viterbi_sync(&sch, p_symbols, p_bytes);
+      if ( cfg.fastlock ) r->resync_period = 1;
+    } else {
+      viterbi_sync *r = new viterbi_sync_bpsk(&sch, p_symbols, p_bytes);
+      if ( cfg.fastlock ) r->resync_period = 1;
+    }      
   } else {
     r_deconv = make_deconvol_sync_simple(&sch, p_symbols, p_bytes, cfg.fec);
     r_deconv->fastlock = cfg.fastlock;
