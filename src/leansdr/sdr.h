@@ -6,22 +6,19 @@
 
 namespace leansdr {
 
-  //////////////////////////////////////////////////////////////////////
-  // SDR blocks
-  //////////////////////////////////////////////////////////////////////
-  
-  typedef unsigned char u8;
-  typedef unsigned short u16;
-  typedef unsigned long u32;
-  typedef signed char s8;
+  // Abbreviations for floating-point types
+
   typedef float f32;
-  
+
   typedef complex<f32> cf32;
-  typedef complex<f32> iqsymbol;
   typedef complex<u8> cu8;
   typedef complex<s8> cs8;
 
 
+  //////////////////////////////////////////////////////////////////////
+  // SDR blocks
+  //////////////////////////////////////////////////////////////////////
+  
   // AUTO-NOTCH FILTER
 
   // Periodically detects the [nslots] strongest peaks with a FFT,

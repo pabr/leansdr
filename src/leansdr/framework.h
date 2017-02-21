@@ -248,6 +248,15 @@ namespace leansdr {
   template<typename T>
   T max(const T &x, const T &y) { return (x<y) ? y : x; }
 
+  // Abreviations for integer types
+
+  typedef unsigned char u8;
+  typedef unsigned short u16;
+  typedef unsigned long u32;
+  typedef signed char s8;
+  typedef signed short s16;
+  typedef signed long s32;
+
 }  // namespace
 
 #endif  // LEANSDR_FRAMEWORK_H
