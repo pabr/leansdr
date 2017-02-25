@@ -1,4 +1,5 @@
 HEAD
+  * Added --hdlc mode (compatible with some satellite modems).
   * Added benchmarking/test suite (test/leandvb_bench.sh)
   * Added tools for benchmarking: leantsgen, leandvbtx, leanchansim.
   * Added LOCKTIME output with --fd-info.

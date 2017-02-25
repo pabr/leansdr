@@ -17,6 +17,9 @@
 #include "leansdr/gui.h"
 #include "leansdr/filtergen.h"
 
+#include "leansdr/hdlc.h"
+#include "leansdr/iess.h"
+
 using namespace leansdr;
 
 // Main loop
@@ -49,6 +52,9 @@ struct config {
   float resample_rej;  // Approx. filter rejection in dB
   bool rrc;            // Apply root raised-cosine filter
   float rolloff;       // Roll-off 0..1
+
+  bool hdlc;           // Expect HDLC frames instead of MPEG packets
+  bool packetized;     // Output frames with 16-bit BE length
 
   bool gui;          // Plot stuff
   float duration;    // Horizontal span of timeline GUI (s)
@@ -85,6 +91,9 @@ struct config {
       resample_rej(10),
       rrc(false),
       rolloff(0.35),
+
+      hdlc(false),
+      packetized(false),
 
       gui(false),
       duration(60),
@@ -425,7 +434,7 @@ int run(config &cfg) {
       viterbi_sync *r = new viterbi_sync(&sch, p_symbols, p_bytes);
       if ( cfg.fastlock ) r->resync_period = 1;
     } else {
-      viterbi_sync *r = new viterbi_sync_bpsk(&sch, p_symbols, p_bytes);
+      viterbi_sync_bpsk *r = new viterbi_sync_bpsk(&sch, p_symbols, p_bytes);
       if ( cfg.fastlock ) r->resync_period = 1;
     }      
   } else {
@@ -433,12 +442,27 @@ int run(config &cfg) {
     r_deconv->fastlock = cfg.fastlock;
   }
 
+  if ( cfg.hdlc ) {
+    pipebuf<u8> *p_descrambled =
+      new pipebuf<u8>(&sch, "descrambled", BUF_MPEGBYTES);
+    new etr192_descrambler(&sch, p_bytes, *p_descrambled);
+    pipebuf<u8> *p_frames =
+      new pipebuf<u8>(&sch, "frames", BUF_MPEGBYTES);
+    hdlc_sync *r_sync = new hdlc_sync(&sch, *p_descrambled, *p_frames, 512);
+    if ( cfg.fastlock ) r_sync->resync_period = 1;
+    if ( cfg.packetized ) r_sync->header16 = true;
+    new file_writer<u8>(&sch, *p_frames, 1);
+  }
+
   pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_MPEGBYTES);
   pipebuf<int> p_lock(&sch, "lock", BUF_SLOW);
   pipebuf<u32> p_locktime(&sch, "locktime", BUF_PACKETS);
-  mpeg_sync<u8,0> r_sync(&sch, p_bytes, p_mpegbytes, r_deconv,
-			 &p_lock, &p_locktime);
-  r_sync.fastlock = cfg.fastlock;
+  if ( ! cfg.hdlc ) {
+    mpeg_sync<u8,0> *r_sync =
+      new mpeg_sync<u8,0>(&sch, p_bytes, p_mpegbytes, r_deconv,
+			  &p_lock, &p_locktime);
+    r_sync->fastlock = cfg.fastlock;
+  }
 
   // DEINTERLEAVING
 
@@ -844,6 +868,11 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --hard-metric  Use Hamming distances with Viterbi\n"
 	  );
   fprintf(f,
+	  "\nCompatibility options:\n"
+	  "  --hdlc         Expect HDLC frames instead of MPEG packets\n"
+	  "  --packetized   Output 16-bit length prefix (default: as stream)\n"
+	  );
+  fprintf(f,
 	  "\nGeneral options:\n"
 	  "  --hq           Maximize sensitivity\n"
 	  "                 (Enables all CPU-intensive features)\n"
@@ -958,12 +987,18 @@ int main(int argc, const char *argv[]) {
       cfg.Ftune = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--drift") )
       cfg.allow_drift = true;
+    else if ( ! strcmp(argv[i], "--hdlc") )
+      cfg.hdlc = true;
+    else if ( ! strcmp(argv[i], "--packetized") )
+      cfg.packetized = true;
+#ifdef GUI
     else if  ( ! strcmp(argv[i], "--gui") )
       cfg.gui = true;
     else if ( ! strcmp(argv[i], "--duration") && i+1<argc )
       cfg.duration = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--linger") )
       cfg.linger = true;
+#endif
     else if ( ! strcmp(argv[i], "--f32") )
       cfg.input_format = config::INPUT_F32;
     else if ( ! strcmp(argv[i], "--u8") )
