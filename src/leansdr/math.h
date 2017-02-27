@@ -69,13 +69,17 @@ namespace leansdr {
   // Pre-computed sin/cos for 16-bit angles
 
   struct trig16 {
-    cf32 lut[65536];  // TBD static and shared
+    complex<float> lut[65536];  // TBD static and shared
     trig16() {
       for ( int a=0; a<65536; ++a )
 	sincosf(a*2*M_PI/65536, &lut[a].im, &lut[a].re);
     }
-    inline cf32 *expi(u16 a) { return &lut[a]; }
-    inline cf32 *expi(float a) { return expi((u16)(s16)a); }
+    inline complex<float> *expi(unsigned short a) {
+      return &lut[a];
+    }
+    inline complex<float> *expi(float a) {
+      return expi((unsigned short)(signed short)a);
+    }
   };
 
 }  // namespace
