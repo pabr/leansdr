@@ -50,7 +50,9 @@ struct config {
   bool hard_metric;
   bool resample;
   float resample_rej;  // Approx. filter rejection in dB
-  bool rrc;            // Apply root raised-cosine filter
+  enum { INTERP_NEAREST, INTERP_LINEAR, INTERP_RRC } interp;
+  int interp_ss;       // Discrete steps between samples, 0=auto
+  float rrc_rej;       // Approx. interpolation filter rejection in dB
   float rolloff;       // Roll-off 0..1
 
   bool hdlc;           // Expect HDLC frames instead of MPEG packets
@@ -89,7 +91,9 @@ struct config {
       hard_metric(false),
       resample(false),
       resample_rej(10),
-      rrc(false),
+      interp(config::INTERP_LINEAR),
+      interp_ss(0),
+      rrc_rej(10),
       rolloff(0.35),
 
       hdlc(false),
@@ -253,7 +257,6 @@ int run(config &cfg) {
   if ( cfg.verbose ) fprintf(stderr, "Roll-off %g\n", cfg.rolloff);
 
   fir_filter<cf32,float> *r_resample = NULL;
-  fir_filter<cf32,float> *r_rrc = NULL;
       
   int decim = 1;
 
@@ -283,31 +286,11 @@ int run(config &cfg) {
 #endif
     int ncoeffs = filtergen::lowpass(order, Fcut, &coeffs);
     filtergen::normalize_dcgain(ncoeffs, coeffs, 1);
-    if ( cfg.debug ) {
-      for ( int i=0; i<ncoeffs; ++i ) fprintf(stderr, "%f, ", coeffs[i]);
-      fprintf(stderr, "\n");
-    }
+    if ( cfg.debug ) filtergen::dump_filter("lowpass", ncoeffs, coeffs);
     r_resample = new fir_filter<cf32,float>
       (&sch, ncoeffs, coeffs, *p_preprocessed, *p_resampled, decim);
     p_preprocessed = p_resampled;
     cfg.Fs /= decim;
-  }
-
-  if ( cfg.rrc ) {
-#if 1
-    fprintf(stderr, "RRC not implemented (ignoring).\n");
-#else
-    float *coeffs;
-    int ncoeffs = filtergen::root_raised_cosine
-      (cfg.Fm/cfg.Fs, rolloff, &coeffs);
-    if ( cfg.verbose )
-      fprintf(stderr, "Inserting RRC filter, %d coeffs.\n", ncoeffs);
-    pipebuf<cf32> *p_rrc =
-      new pipebuf<cf32>(&sch, "rrc", BUF_BASEBAND);
-    r_rrc = new fir_filter<cf32,float>
-      (&sch, ncoeffs, coeffs, *p_preprocessed, *p_rrc);
-    p_preprocessed = p_rrc;
-#endif
   }
 
   // DECIMATION
@@ -356,8 +339,39 @@ int run(config &cfg) {
   pipebuf<f32> p_ss(&sch, "SS", BUF_SLOW);
   pipebuf<f32> p_mer(&sch, "MER", BUF_SLOW);
   pipebuf<cf32> p_sampled(&sch, "PSK symbols", BUF_BASEBAND);
-  // TBD retype preprocess as unsigned char
-  cstln_receiver<f32> demod(&sch, *p_preprocessed, p_symbols,
+  interpolator_interface<f32> *interpolator;
+  switch ( cfg.interp ) {
+  case config::INTERP_NEAREST:
+    interpolator = new nearest_interpolator<float>();
+    break;
+  case config::INTERP_LINEAR:
+    interpolator = new linear_interpolator<float>();
+    break;
+  case config::INTERP_RRC: {
+    float *coeffs;
+    if ( cfg.interp_ss == 0 ) {
+      // At least 16 discrete sampling points between symbols
+      cfg.interp_ss = max(1, (int)(16*cfg.Fm / cfg.Fs));
+      if ( cfg.verbose )
+	fprintf(stderr, "RRC interpolator: %d steps\n", cfg.interp_ss);
+    }
+    float Frrc = cfg.Fs * cfg.interp_ss;  // Sample freq of the RRC filter
+    float transition = (cfg.Fm/2) * cfg.rolloff;
+    int order = cfg.rrc_rej * Frrc / (22*transition);
+    int ncoeffs = filtergen::root_raised_cosine
+      (order, cfg.Fm/Frrc, cfg.rolloff, &coeffs);
+    if ( cfg.verbose )
+      fprintf(stderr, "RRC interpolator: %d coeffs.\n", ncoeffs);
+    if ( cfg.debug ) filtergen::dump_filter("rrc", ncoeffs, coeffs);
+    interpolator = new fir_interpolator<float,float>
+      (ncoeffs, coeffs, cfg.interp_ss);
+    break;
+  }
+  default:
+    fatal("Interpolator not implemented");
+  }
+  cstln_receiver<f32> demod(&sch, interpolator,
+			    *p_preprocessed, p_symbols,
 			    &p_freq, &p_ss, &p_mer, &p_sampled);
   if ( cfg.standard == config::DVB_S ) {
     if ( cfg.constellation != cstln_lut<256>::QPSK &&
@@ -400,11 +414,6 @@ int run(config &cfg) {
     r_resample->freq_tap = &demod.freq_tap;
     r_resample->tap_multiplier = 1.0 / decim;
     r_resample->freq_tol = cfg.Fm/(cfg.Fs*decim) * 0.1;
-  }
-
-  if ( r_rrc ) {
-    r_rrc->freq_tap = &demod.freq_tap;
-    r_rrc->freq_tol = cfg.Fm/cfg.Fs * 0.1;
   }
 
   if ( r_cnr ) {
@@ -571,13 +580,21 @@ int run(config &cfg) {
   }
 #endif  // GUI
 
-  if ( cfg.debug )
-    fprintf(stderr,
-	    "Output:\n"
-	    "  '_': packet received without errors\n"
-	    "  '.': error-corrected packet\n"
-	    "  '!': packet with remaining errors\n");
-    
+  if ( cfg.debug ) {
+    if ( ! cfg.hdlc )
+      fprintf(stderr,
+	      "Output:\n"
+	      "  '_': packet received without errors\n"
+	      "  '.': error-corrected packet\n"
+	      "  '!': packet with remaining errors\n");
+    else
+      fprintf(stderr,
+	      "Output:\n"
+	      "  '_': frame with correct checksum\n"
+	      "  '!': frame with invalid checksum\n"
+	      "  '^': framing error\n");
+  }
+
   sch.run();
 
   sch.shutdown();
@@ -851,7 +868,6 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --resample     Resample baseband (CPU-intensive)\n"
 	  "  --resample-rej K  Aliasing rejection (default: 10)\n"
 	  "  --decim N      Decimate baseband (causes aliasing)\n"
-	  "  --roll-off A   Roll-off (default: 0.35)\n"
 	  "  --cnr          Measure CNR (requires samplerate>3*symbolrate)\n"
 	  "  --fd-pp NUM    Dump preprocessed IQ data to file descriptor\n"
 	  );
@@ -864,6 +880,10 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --const C      QPSK (default), BPSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
 	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
+	  "  --interp       linear, rrc\n"
+	  "  --interp-ss N  Sub-sampling steps\n"
+	  "  --interp-rej K RRC filter rejection (defaut:10)\n"
+	  "  --roll-off A   RRC roll-off (default: 0.35)\n"
 	  "  --viterbi      Use Viterbi (CPU-intensive)\n"
 	  "  --hard-metric  Use Hamming distances with Viterbi\n"
 	  );
@@ -967,15 +987,23 @@ int main(int argc, const char *argv[]) {
       cfg.resample_rej = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--decim") && i+1<argc )
       cfg.decim = atoi(argv[++i]);
-    else if ( ! strcmp(argv[i], "--rrc") )
-      cfg.rrc = true;
+    else if ( ! strcmp(argv[i], "--interp") && i+1<argc ) {
+      ++i;
+      if      (!strcmp(argv[i],"nearest")) cfg.interp = config::INTERP_NEAREST;
+      else if (!strcmp(argv[i],"linear" )) cfg.interp = config::INTERP_LINEAR;
+      else if (!strcmp(argv[i],"rrc"    )) cfg.interp = config::INTERP_RRC;
+      else usage(argv[0], stderr, 1);
+    }
+    else if ( ! strcmp(argv[i], "--interp-ss") && i+1<argc )
+      cfg.interp_ss = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--rrc-rej") && i+1<argc )
+      cfg.rrc_rej = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--roll-off") && i+1<argc )
       cfg.rolloff = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--hq") ) {
       cfg.fastlock = true;
       cfg.viterbi = true;
-      cfg.resample = true;
-      cfg.rrc = true;
+      cfg.interp = config::INTERP_RRC;
     }
     else if ( ! strcmp(argv[i], "--hs") )
       cfg.highspeed = true;
