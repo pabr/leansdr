@@ -9,9 +9,10 @@ namespace leansdr {
 					  
   struct hdlc_dec {
 
-    hdlc_dec(int _maxframesize,  // Including CRC, excluding HDLC flags.
+    hdlc_dec(int _minframesize,  // Including CRC, excluding HDLC flags.
+	     int _maxframesize,
 	     bool _invert)
-      : maxframesize(_maxframesize),
+      : minframesize(_minframesize), maxframesize(_maxframesize),
 	invertmask(_invert?0xff:0),
 	framebuf(new u8[maxframesize]),
 	debug(false)
@@ -62,10 +63,12 @@ namespace leansdr {
 	      nbits_out = 0;
 	      // Checksum
 	      crc16 ^= 0xffff;
-	      if ( framesize<2 || crc16!=crc16_check ) {
+	      if ( framesize<2 || framesize<minframesize ||
+		   crc16!=crc16_check ) {
 		if ( debug ) fprintf(stderr, "!");
 		*discarded += framesize;
-		++*fcs_errors;
+		// Do not report random noise as FCS errors
+		if ( framesize >= minframesize ) ++*fcs_errors;
 	      } else {
 		if ( debug ) fprintf(stderr, "_");
 		*pdatasize = framesize-2;
@@ -99,7 +102,7 @@ namespace leansdr {
 
   private:
     // Config
-    int maxframesize;
+    int minframesize, maxframesize;
     u8 invertmask;
     u8 *framebuf;   // [maxframesize]
     // State
@@ -130,21 +133,20 @@ namespace leansdr {
     hdlc_sync(scheduler *sch,
 	      pipebuf<u8> &_in,   // Packed bits
 	      pipebuf<u8> &_out,  // Bytes
-	      int _maxframesize)  // Including CRC, excluding HDLC flags.
+	      int _minframesize,  // Including CRC, excluding HDLC flags.
+	      int _maxframesize)
       : runnable(sch, "hdlc_sync"),
-	in(_in), out(_out, _maxframesize*3),
+	chunk_size(maxframesize+2),
+	in(_in), out(_out, _maxframesize+chunk_size),
 	maxframesize(_maxframesize),
 	current_sync(0), resync_phase(0), resync_period(32),
 	header16(false)
     {
       for ( int s=0; s<NSYNCS; ++s )
-	syncs[s] = new hdlc_dec(maxframesize, s!=0);
+	syncs[s] = new hdlc_dec(minframesize, maxframesize, s!=0);
     }
 
     void run() {
-      // Process in chunks of at least two frames
-      // in order to get relevant error counts.
-      int chunk_size = 2 * maxframesize;
       // Note: hdlc_dec may already hold one frame ready for output.
       while ( in.readable() >= chunk_size &&
 	      out.writable() >= maxframesize+chunk_size ) {
@@ -166,7 +168,7 @@ namespace leansdr {
 	  for ( int s=0; s<NSYNCS; ++s )
 	    if ( total_discarded[s] < total_discarded[best] ) best = s;
 	  if ( best != current_sync ) {
-	    if ( sch->debug ) fprintf(stderr, "{%d->%d}", current_sync, best);
+	    if ( sch->debug ) fprintf(stderr, "[%d->%d]", current_sync, best);
 	    syncs[current_sync]->debug = false;
 	    current_sync = best;
 	    syncs[current_sync]->debug = sch->debug;
@@ -195,9 +197,10 @@ namespace leansdr {
       out.written(size);
     }
 
+    int chunk_size;
     pipereader<u8> in;
     pipewriter<u8> out;
-    int maxframesize;
+    int minframesize, maxframesize;
     static const int NSYNCS = 2;  // Two possible polarities
     hdlc_dec *syncs[NSYNCS];
     int current_sync;

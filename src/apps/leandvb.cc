@@ -457,7 +457,7 @@ int run(config &cfg) {
     new etr192_descrambler(&sch, p_bytes, *p_descrambled);
     pipebuf<u8> *p_frames =
       new pipebuf<u8>(&sch, "frames", BUF_MPEGBYTES);
-    hdlc_sync *r_sync = new hdlc_sync(&sch, *p_descrambled, *p_frames, 512);
+    hdlc_sync *r_sync = new hdlc_sync(&sch, *p_descrambled, *p_frames, 2, 278);
     if ( cfg.fastlock ) r_sync->resync_period = 1;
     if ( cfg.packetized ) r_sync->header16 = true;
     new file_writer<u8>(&sch, *p_frames, 1);
