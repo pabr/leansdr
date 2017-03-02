@@ -410,9 +410,101 @@ namespace leansdr {
 	}
     }
 
+  };  // cstln_lut
+
+
+  // INTERPOLATOR INTERFACE FOR CSTLN_RECEIVER
+  
+  template<typename T>
+  struct interpolator_interface {
+    virtual complex<T> interp(complex<T> *pin, float mu, float phase) = 0;
+    virtual void update_freq(float freqw) { }  // 65536 = 1 Hz
+    virtual int readahead() { return 0; }
   };
 
-  
+
+  // NEAREST-SAMPLE INTERPOLATOR FOR CSTLN_RECEIVER
+  // Suitable for bandpass-filtered, oversampled signals only
+
+  template<typename T>
+  struct nearest_interpolator : interpolator_interface<T> {
+    int readahead() { return 0; }
+    complex<T> interp(complex<T> *pin, float mu, float phase) {
+      return pin[0]*trig.expi(-phase);
+    }
+  private:
+    trig16 trig;
+  };  // nearest_interpolator
+
+
+  // LINEAR INTERPOLATOR FOR CSTLN_RECEIVER
+
+  template<typename T>
+  struct linear_interpolator : interpolator_interface<T> {
+    int readahead() { return 1; }
+
+    complex<T> interp(complex<T> *pin, float mu, float phase) {
+      // Derotate pin[0] and pin[1]
+      complex<T> s0 = pin[0]*trig.expi(-phase);
+      complex<T> s1 = pin[1]*trig.expi(-(phase+freqw));
+      // Interpolate linearly
+      return s0*(1-mu) + s1*mu;
+    }
+
+    void update_freq(float _freqw) { freqw = _freqw; }
+
+  private:
+    trig16 trig;
+    float freqw;
+  };  // linear_interpolator
+
+
+  // FIR INTERPOLATOR FOR CSTLN_RECEIVER
+
+  template<typename T, typename Tc>
+  struct fir_interpolator : interpolator_interface<T> {
+    fir_interpolator(int _ncoeffs, Tc *_coeffs, int _subsampling=1)
+      : ncoeffs(_ncoeffs), coeffs(_coeffs), subsampling(_subsampling),
+	shifted_coeffs(new complex<T>[ncoeffs]),
+	update_freq_phase(0)
+    {
+    }
+
+    int readahead() { return ncoeffs-1; }
+
+    complex<T> interp(complex<T> *pin, float mu, float phase) {
+      // Apply FIR filter with subsampling
+      complex<T> acc(0, 0);
+      for ( complex<T> *pc = shifted_coeffs+(int)((1-mu)*subsampling),
+	      *pcend = shifted_coeffs+ncoeffs;
+	    pc < pcend;
+	    pc+=subsampling, ++pin )
+	acc = acc + (*pc)*(*pin);
+      // Derotate
+      return trig.expi(-phase) * acc;
+    }
+
+    void update_freq(float freqw) {
+      if ( ! update_freq_phase ) {
+	float f = freqw / subsampling;
+	for ( int i=0; i<ncoeffs; ++i )
+	  shifted_coeffs[i] = trig.expi(-f*(i-ncoeffs/2)) * coeffs[i];
+      }
+      // Throttling: Recompute one coeff per processed sample.
+      update_freq_phase += 128;  // chunk_size of cstln_receiver
+      if ( update_freq_phase >= ncoeffs ) update_freq_phase = 0;
+    }
+
+  private:
+    trig16 trig;
+    int ncoeffs;
+    Tc *coeffs;
+    int subsampling;
+    cf32 *shifted_coeffs;
+    int update_freq_phase;
+  };  // fir_interpolator
+
+
   // CONSTELLATION RECEIVER
 
   // Linear interpolation: good enough for 1.2 samples/symbol,
@@ -420,15 +512,17 @@ namespace leansdr {
 
   template<typename T>
   struct cstln_receiver : runnable {
+    interpolator_interface<T> *interpolator;
     cstln_lut<256> *cstln;
     unsigned long meas_decimation;      // Measurement rate
     float omega, min_omega, max_omega;  // Samples per symbol
-    signed long freqw, min_freqw, max_freqw;  // Freq offs (angle per sample)
+    float freqw, min_freqw, max_freqw;  // Freq offs (65536 = 1 Hz)
     bool allow_drift;                   // Follow carrier beyond safe limits
     static const unsigned int chunk_size = 128;
     float kest;
     
     cstln_receiver(scheduler *sch,
+		   interpolator_interface<T> *_interpolator,
 		   pipebuf< complex<T> > &_in,
 		   pipebuf<softsymbol> &_out,
 		   pipebuf<float> *_freq_out=NULL,
@@ -436,6 +530,7 @@ namespace leansdr {
 		   pipebuf<float> *_mer_out=NULL,
 		   pipebuf<cf32> *_cstln_out=NULL)
       : runnable(sch, "Constellation receiver"),
+	interpolator(_interpolator),
 	cstln(NULL),
 	meas_decimation(1048576),
 	allow_drift(false),
@@ -452,7 +547,6 @@ namespace leansdr {
       mer_out = _mer_out ? new pipewriter<float>(*_mer_out) : NULL;
       cstln_out = _cstln_out ? new pipewriter<cf32>(*_cstln_out) : NULL;
       memset(hist, 0, sizeof(hist));
-      init_trig_tables();
     }
     
     void set_omega(float _omega, float tol=10e-6) {
@@ -483,22 +577,22 @@ namespace leansdr {
       if ( ! cstln ) fail("constellation not set");
       
       // Magic constants that work with the qa recordings.
-      signed long freq_alpha = 0.04 * 65536;
-      signed long freq_beta = 0.0012 * 65536 / omega;
-      if ( ! freq_beta ) fail("Excessive oversampling");
-
+      float freq_alpha = 0.04;
+      float freq_beta = 0.0012 / omega;
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
       
       int max_meas = chunk_size/meas_decimation + 1;
-      // Largin margin on output_size because mu adjustments
+      // Large margin on output_size because mu adjustments
       // can lead to more than chunk_size/min_omega symbols.
-      while ( in.readable() >= chunk_size+1 &&  // +1 for interpolation
+      while ( in.readable() >= chunk_size+interpolator->readahead() &&
 	      out.writable() >= chunk_size &&
 	      ( !freq_out  || freq_out ->writable()>=max_meas ) &&
 	      ( !ss_out    || ss_out   ->writable()>=max_meas ) &&
 	      ( !mer_out   || mer_out  ->writable()>=max_meas ) &&
 	      ( !cstln_out || cstln_out->writable()>=max_meas ) ) {
 	
+	interpolator->update_freq(freqw);
+
 	complex<T> *pin=in.rd(), *pin0=pin, *pend=pin+chunk_size;
 	softsymbol *pout=out.wr(), *pout0=pout;
 	
@@ -512,20 +606,7 @@ namespace leansdr {
 	  if ( mu < 1 ) {
 	    // Here 0<=mu<1 is the fractional time of the next symbol
 	    // between pin and pin+1.
-	    
-	    // Derotate pin[0] and pin[1]
-	    float cosph, sinph;
-	    cosph = fastcos(-phase);
-	    sinph = fastsin(-phase);
-	    complex<float> s0(pin[0].re*cosph - pin[0].im*sinph,
-			      pin[0].re*sinph + pin[0].im*cosph);
-	    cosph = fastcos(-(phase+freqw));
-	    sinph = fastsin(-(phase+freqw));
-	    complex<float> s1(pin[1].re*cosph - pin[1].im*sinph,
-			      pin[1].re*sinph + pin[1].im*cosph);
-	    
-	    // Interpolate linearly
-	    sg = s0*(1-mu) + s1*mu;
+	    sg = interpolator->interp(pin, mu, phase);
 	    s = sg * agc_gain;
 	    
 	    // Constellation look-up
@@ -534,16 +615,8 @@ namespace leansdr {
 	    ++pout;
 	    
 	    // PLL
-#if 0
-	    signed short c1 = (cr->phase_error * freq_alpha + 1) >> 16;
-	    signed short c2 = (cr->phase_error * freq_alpha) / 65536;
-	  //	  if ( c1 != c2 ) fprintf(stderr, "\n### %d %d %d\n", cr->phase_error, c1, c2);
-	    phase += (cr->phase_error * freq_alpha) / 65536;
-	    freqw += (cr->phase_error * freq_beta) / 65536;
-#else
-	    phase += (cr->phase_error * freq_alpha + 32768) >> 16;
-	    freqw += (cr->phase_error * freq_beta + 32768) >> 16;
-#endif  
+	    phase += cr->phase_error * freq_alpha;
+	    freqw += cr->phase_error * freq_beta;
 	    
 	    // Modified Mueller and Müller
 	    // mu[k]=real((c[k]-c[k-2])*conj(p[k-1])-(p[k]-p[k-2])*conj(c[k-1]))
@@ -579,6 +652,11 @@ namespace leansdr {
 	
 	in.read(pin-pin0);
 	out.written(pout-pout0);
+
+	// Normalize phase so that it never exceeds 32 bits.
+	// Max freqw is 2^31/65536/chunk_size = 256 Hz
+	// (this may happen with leandvb --drift --decim).
+	phase = fmodf(phase, 65536);
 
 	if ( cstln_point ) {
 	  
@@ -643,7 +721,7 @@ namespace leansdr {
     
     float freq_tap;
     void refresh_freq_tap() {
-      freq_tap = (float)freqw / 65536;
+      freq_tap = freqw / 65536;
     }
   private:
     struct {
@@ -654,22 +732,13 @@ namespace leansdr {
     pipewriter<softsymbol> out;
     float est_insp, agc_gain;
     float mu;  // PSK time expressed in clock ticks
-    u_angle phase;
+    float phase;  // 65536=2pi
     // Signal estimation
     float est_sp;  // Estimated RMS signal power
     float est_ep;  // Estimated RMS error vector power
     unsigned long meas_count;
     pipewriter<float> *freq_out, *ss_out, *mer_out;
     pipewriter<cf32> *cstln_out;
-
-    float lut_cos[65536];
-    float fastcos(u_angle a) { return lut_cos[a]; }
-    float fastsin(u_angle a) { return lut_cos[(u_angle)(a-16384)]; }
-
-    void init_trig_tables() {
-      for ( int a=0; a<65536; ++a )
-	lut_cos[a] = cosf(a*2*M_PI/65536);
-    }
   };
  
   
@@ -990,7 +1059,7 @@ namespace leansdr {
     float lut_cos[65536];
     float lut_sin[65536];
     unsigned short index;  // Current phase
-  };
+  };  // rotator
 
 
   // SPECTRUM-BASED CNR ESTIMATOR
@@ -1072,7 +1141,7 @@ namespace leansdr {
     cfft_engine<T> fft;
     T *avgpower;
     int phase;
-  };
+  };  // cnr_fft
   
 }  // namespace
 
