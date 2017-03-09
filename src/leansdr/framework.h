@@ -193,6 +193,8 @@ namespace leansdr {
     }
   };
 
+  // Convenience functions for working with optional pipes
+
   template<typename T>
   pipewriter<T> *opt_writer(pipebuf<T> *buf) {
     return buf ? new pipewriter<T>(*buf) : NULL;
@@ -201,6 +203,11 @@ namespace leansdr {
   template<typename T>
   bool opt_writable(pipewriter<T> *p, int n=1) {
     return (p==NULL) || p->writable()>=n;
+  }
+
+  template<typename T>
+  void opt_write(pipewriter<T> *p, T val) {
+    if ( p ) p->write(val);
   }
 
   template<typename T>
