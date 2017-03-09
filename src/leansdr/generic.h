@@ -20,8 +20,8 @@ struct file_reader : runnable {
   file_reader(scheduler *sch, int _fdin, pipebuf<T> &_out)
     : runnable(sch, _out.name),
       loop(false),
-      fdin(_fdin), out(_out),
-      pos(0) {
+      fdin(_fdin), out(_out)
+  {
   }
   void run() {
     size_t size = out.writable() * sizeof(T);
@@ -43,7 +43,6 @@ struct file_reader : runnable {
 private:
   int fdin;
   pipewriter<T> out;
-  off_t pos;
 };
 
 // [file_writer] writes raw data from a [pipebuf] to a file descriptor.

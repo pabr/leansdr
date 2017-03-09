@@ -160,8 +160,8 @@ namespace leansdr {
   };
 
   // Paths (sequences of uncoded symbols) represented as bitstreams.
-  // NBITS is the number of NBITS per items.
-  // DEPTH is the number of items.
+  // NBITS is the number of bits per symbol.
+  // DEPTH is the number of symbols stored in the path.
   // T is an unsigned integer type wider than NBITS*DEPTH.
 
   template<typename T, typename TUS, int NBITS, int DEPTH>

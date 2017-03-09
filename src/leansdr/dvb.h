@@ -1240,7 +1240,8 @@ namespace leansdr {
     }
 
     void run() {
-      while ( in.readable()>=2*8*chunk_size+1 && out.writable()>=chunk_size ) {
+      while ( in.readable()>=2*8*chunk_size+1 &&  // +1 for pair alignment
+	      out.writable()>=chunk_size ) {
 	unsigned long totaldiscr[NSYNCS];
 	for ( int s=0; s<NSYNCS; ++s ) totaldiscr[s] = 0;
 	for ( int bytenum=0; bytenum<chunk_size; ++bytenum ) {
@@ -1274,7 +1275,6 @@ namespace leansdr {
 	  out.write(byte);
 	}  // chunk_size
  	if ( ! resync_phase ) {
-	fprintf(stderr, "bpskd %d %d\n", totaldiscr[0], totaldiscr[1]);
 	  // Switch to another decoder ?
 	  int best = current_sync;
 	  for ( int s=0; s<NSYNCS; ++s )
