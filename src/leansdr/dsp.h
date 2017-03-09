@@ -254,7 +254,7 @@ namespace leansdr {
     void set_freq(float f) {
       for ( int i=0; i<ncoeffs; ++i ) {
 	float c, s;
-	sincosf(2*M_PI*f*i, &s, &c);
+	sincosf(2*M_PI*f*(i-ncoeffs/2), &s, &c);
 	// TBD Support T=complex
 	shifted_coeffs[i].re = coeffs[i] * c;
 	shifted_coeffs[i].im = coeffs[i] * s;
