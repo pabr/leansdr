@@ -354,8 +354,13 @@ namespace leansdr {
       struct softsymbol ss;
       s_angle phase_error;
     };
+    inline result *lookup(float I, float Q) {
+      // float-to-s8 saturates on some platorms, which is good.
+      return &lut[(u8)(s8)I][(u8)(s8)Q];
+    }
     inline result *lookup(int I, int Q) {
-      return &lut[(unsigned char)I][(unsigned char)Q];
+      // Ignore wrapping modulo 256
+      return &lut[(u8)I][(u8)Q];
     }
   private:
     complex<signed char> polar(float r, int n, float i) {
