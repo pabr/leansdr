@@ -1067,7 +1067,7 @@ namespace leansdr {
   // Assumes that the spectrum is as follows:
   //
   //  ---|--noise---|-roll-off-|---carrier+noise----|-roll-off-|---noise--|---
-  //     |  (bw/2)  |  (bw/2)  |        (bw)        |  (bw/2)  |  (bw/2)  |
+  //     |  (bw/2)  |   (bw)   |       (bw/2)       |   (bw)   |  (bw/2)  |
   //
   // Maximum roll-off 0.5
 
@@ -1080,8 +1080,8 @@ namespace leansdr {
 	decimation(1048576), kavg(0.1),
 	in(_in), out(_out),
 	fft(nfft), avgpower(NULL), phase(0) {
-      if ( bandwidth > 0.33 )
-	fail("CNR estimator requires Fsampling > 3x Fsignal");
+      if ( bandwidth > 0.25 )
+	fail("CNR estimator requires Fsampling > 4x Fsignal");
     }
 
     float bandwidth;
@@ -1112,19 +1112,21 @@ namespace leansdr {
       for ( int i=0; i<fft.n; ++i )
 	power[i] = data[i].re*data[i].re + data[i].im*data[i].im;
       if ( ! avgpower ) {
+	// Initialize with first spectrum
 	avgpower = new T[fft.n];
 	memcpy(avgpower, power, fft.n*sizeof(avgpower[0]));
       }
+      // Accumulate and low-pass filter
       for ( int i=0; i<fft.n; ++i )
 	avgpower[i] = avgpower[i]*(1-kavg) + power[i]*kavg;
       
-      int bwslots = (bandwidth/2) * fft.n;
+      int bwslots = (bandwidth/4) * fft.n;
       if ( ! bwslots ) return;
       // Measure carrier+noise in center band
       float c2plusn2 = avgslots(icf-bwslots, icf+bwslots);
       // Measure noise left and right of roll-off zones
-      float n2 = ( avgslots(icf-bwslots*3, icf-bwslots*2) +
-		   avgslots(icf+bwslots*2, icf+bwslots*3) ) / 2;
+      float n2 = ( avgslots(icf-bwslots*4, icf-bwslots*3) +
+		   avgslots(icf+bwslots*3, icf+bwslots*4) ) / 2;
       float c2 = c2plusn2 - n2;
       float cnr = (c2>0 && n2>0) ? 10 * logf(c2/n2)/logf(10) : -50;
       out.write(cnr);
