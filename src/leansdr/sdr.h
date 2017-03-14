@@ -384,7 +384,7 @@ namespace leansdr {
 	  float ph_err = atan2f(Q,I) - ph_symbol;
 	  if ( dmin > 255 ) fail("dmin overflow");
 	  pr->ss.symbol = smin;
-	  pr->phase_error = ph_err * 65536 / (2*M_PI);
+	  pr->phase_error = (s32)(ph_err * 65536 / (2*M_PI));  // Mod 65536
 	}
     }
 
