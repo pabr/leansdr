@@ -26,17 +26,29 @@ struct file_reader : runnable {
   void run() {
     size_t size = out.writable() * sizeof(T);
     if ( ! size ) return;
+
   again:
     ssize_t nr = read(fdin, out.wr(), size);
     if ( nr < 0 ) fatal("read");
-    if ( !nr && !loop ) return;
     if ( ! nr ) {
+      if ( ! loop ) return;
       if ( sch->debug ) fprintf(stderr, "%s looping\n", name);
       off_t res = lseek(fdin, 0, SEEK_SET);
       if ( res == (off_t)-1 ) fatal("lseek");
       goto again;
     }
-    if ( nr % sizeof(T) ) fatal("partial read");
+
+    // Always stop at element boundary (may block)
+    size_t partial = nr % sizeof(T);
+    size_t remain = partial ? sizeof(T)-partial : 0;
+    while ( remain ) {
+      if ( sch->debug ) fprintf(stderr, "+");
+      ssize_t nr2 = read(fdin, (char*)out.wr()+nr, remain);
+      if ( nr2 <= 0 ) fatal("partial read");
+      nr += nr2;
+      remain -= nr2;
+    }
+
     out.written(nr / sizeof(T));
   }
   bool loop;
