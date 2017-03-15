@@ -74,11 +74,12 @@ namespace leansdr {
       for ( int a=0; a<65536; ++a )
 	sincosf(a*2*M_PI/65536, &lut[a].im, &lut[a].re);
     }
-    inline complex<float> *expi(unsigned short a) {
-      return &lut[a];
+    inline const complex<float> &expi(unsigned short a) const {
+      return lut[a];
     }
-    inline complex<float> *expi(float a) {
-      return expi((unsigned short)(signed short)a);
+    // a must fit in a signed long, otherwise behaviour is undefined
+    inline const complex<float> &expi(float a) const {
+      return expi((unsigned short)(signed short)(signed long)a);
     }
   };
 
