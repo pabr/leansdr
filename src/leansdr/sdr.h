@@ -572,10 +572,20 @@ namespace leansdr {
     }
 
     void update_freq_limits() {
-      // Prevent PLL from locking at +-symbolrate/4.
-      // TODO The +-SR/8 limit is suitable for QPSK only.
-      min_freqw = freqw - 65536/max_omega/8;
-      max_freqw = freqw + 65536/max_omega/8;
+      // Prevent PLL from crossing +-SR/n/2 and locking at +-SR/n.
+      int n = 4;
+      if ( cstln ) {
+	switch ( cstln->nsymbols ) {
+	case  2: n =  2; break;  // BPSK
+	case  4: n =  4; break;  // QPSK
+	case  8: n =  8; break;  // 8PSK
+	case 16: n = 12; break;  // 16APSK
+	case 32: n = 16; break;  // 32APSK
+	default: n =  4; break;
+	}
+      }
+      min_freqw = freqw - 65536/max_omega/n/2;
+      max_freqw = freqw + 65536/max_omega/n/2;
     }
     
     void run() {
