@@ -31,6 +31,7 @@ struct config {
   float float_scale; // Scaling factor for float data.
   bool loop_input;
   int input_buffer;  // Extra input buffer size
+  int buf_factor;    // Buffer sizing
   float Fs;          // Sampling frequency (Hz) 
   float Fderot;      // Shift the signal (Hz). Note: Ftune is faster
   int anf;           // Number of auto notch filters
@@ -73,6 +74,7 @@ struct config {
       float_scale(1.0),
       loop_input(false),
       input_buffer(0),
+      buf_factor(4),
       Fs(2.4e6),
       Fderot(0),
       anf(1),
@@ -136,30 +138,29 @@ int run(config &cfg) {
   };
   sch.windows = window_hints;
 
-  int BUF_OVERSIZE = 4;
   // Min buffer size for baseband data
   //   scopes: 1024
   //   ss_estimator: 1024
   //   anf: 4096
   //   cstln_receiver: reads in chunks of 128+1
-  unsigned long BUF_BASEBAND = 4096 * BUF_OVERSIZE;
+  unsigned long BUF_BASEBAND = 4096 * cfg.buf_factor;
   // Min buffer size for IQ symbols
   //   cstln_receiver: writes in chunks of 128/omega symbols (margin 128)
   //   deconv_sync: reads at least 64+32
   // A larger buffer improves performance significantly.
-  unsigned long BUF_SYMBOLS = 1024 * BUF_OVERSIZE;
+  unsigned long BUF_SYMBOLS = 1024 * cfg.buf_factor;
   // Min buffer size for unsynchronized bytes
   //   deconv_sync: writes 32 bytes
   //   mpeg_sync: reads up to 204*scan_syncs = 1632 bytes
-  unsigned long BUF_BYTES = 2048 * BUF_OVERSIZE;
+  unsigned long BUF_BYTES = 2048 * cfg.buf_factor;
   // Min buffer size for synchronized (but interleaved) bytes
   //   mpeg_sync: writes 1 rspacket
   //   deinterleaver: reads 17*11*12+204 = 2448 bytes
-  unsigned long BUF_MPEGBYTES = 2448 * BUF_OVERSIZE;
+  unsigned long BUF_MPEGBYTES = 2448 * cfg.buf_factor;
   // Min buffer size for packets: 1
-  unsigned long BUF_PACKETS = BUF_OVERSIZE;
+  unsigned long BUF_PACKETS = cfg.buf_factor;
   // Min buffer size for misc measurements: 1
-  unsigned long BUF_SLOW = BUF_OVERSIZE;
+  unsigned long BUF_SLOW = cfg.buf_factor;
 
   // INPUT
 
@@ -627,30 +628,29 @@ int run_highspeed(config &cfg) {
   };
   sch.windows = window_hints;
 
-  int BUF_OVERSIZE = 4;
   // Min buffer size for baseband data
   //   scopes: 1024
   //   ss_estimator: 1024
   //   anf: 4096
   //   cstln_receiver: reads in chunks of 128+1
-  unsigned long BUF_BASEBAND = 4096 * BUF_OVERSIZE;
+  unsigned long BUF_BASEBAND = 4096 * cfg.buf_factor;
   // Min buffer size for IQ symbols
   //   cstln_receiver: writes in chunks of 128/omega symbols (margin 128)
   //   deconv_sync: reads at least 64+32
   // A larger buffer improves performance significantly.
-  unsigned long BUF_SYMBOLS = 1024 * BUF_OVERSIZE;
+  unsigned long BUF_SYMBOLS = 1024 * cfg.buf_factor;
   // Min buffer size for unsynchronized bytes
   //   deconv_sync: writes 32 bytes
   //   mpeg_sync: reads up to 204*scan_syncs = 1632 bytes
-  unsigned long BUF_BYTES = 2048 * BUF_OVERSIZE;
+  unsigned long BUF_BYTES = 2048 * cfg.buf_factor;
   // Min buffer size for synchronized (but interleaved) bytes
   //   mpeg_sync: writes 1 rspacket
   //   deinterleaver: reads 17*11*12+204 = 2448 bytes
-  unsigned long BUF_MPEGBYTES = 2448 * BUF_OVERSIZE;
+  unsigned long BUF_MPEGBYTES = 2448 * cfg.buf_factor;
   // Min buffer size for packets: 1
-  unsigned long BUF_PACKETS = BUF_OVERSIZE;
+  unsigned long BUF_PACKETS = cfg.buf_factor;
   // Min buffer size for misc measurements: 1
-  unsigned long BUF_SLOW = BUF_OVERSIZE;
+  unsigned long BUF_SLOW = cfg.buf_factor;
 
   // HIGHSPEED: INPUT
   
@@ -894,6 +894,7 @@ void usage(const char *name, FILE *f, int c) {
 	  );
   fprintf(f,
 	  "\nGeneral options:\n"
+	  "  --buf-factor   Buffer size factor (default:4)\n"
 	  "  --hq           Maximize sensitivity\n"
 	  "                 (Enables all CPU-intensive features)\n"
 	  "  --hs           Maximize throughput (QPSK CR1/2 only)\n"
@@ -1037,6 +1038,8 @@ int main(int argc, const char *argv[]) {
       cfg.loop_input = true;
     else if ( ! strcmp(argv[i], "--inbuf")  && i+1<argc )
       cfg.input_buffer = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--buf-factor")  && i+1<argc )
+      cfg.buf_factor = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--derotate") && i+1<argc )
       cfg.Fderot = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--fd-pp") && i+1<argc )
