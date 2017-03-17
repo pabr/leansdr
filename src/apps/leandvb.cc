@@ -50,9 +50,9 @@ struct config {
   bool hard_metric;
   bool resample;
   float resample_rej;  // Approx. filter rejection in dB
-  enum { INTERP_NEAREST, INTERP_LINEAR, INTERP_RRC } interp;
-  int interp_ss;       // Discrete steps between samples, 0=auto
-  float rrc_rej;       // Approx. interpolation filter rejection in dB
+  enum { SAMP_NEAREST, SAMP_LINEAR, SAMP_RRC } sampler;
+  int rrc_steps;       // Discrete steps between symbols, 0=auto
+  float rrc_rej;       // Approx. RRC filter rejection in dB
   float rolloff;       // Roll-off 0..1
 
   bool hdlc;           // Expect HDLC frames instead of MPEG packets
@@ -91,8 +91,8 @@ struct config {
       hard_metric(false),
       resample(false),
       resample_rej(10),
-      interp(config::INTERP_LINEAR),
-      interp_ss(0),
+      sampler(config::SAMP_LINEAR),
+      rrc_steps(0),
       rrc_rej(10),
       rolloff(0.35),
 
@@ -339,38 +339,38 @@ int run(config &cfg) {
   pipebuf<f32> p_ss(&sch, "SS", BUF_SLOW);
   pipebuf<f32> p_mer(&sch, "MER", BUF_SLOW);
   pipebuf<cf32> p_sampled(&sch, "PSK symbols", BUF_BASEBAND);
-  interpolator_interface<f32> *interpolator;
-  switch ( cfg.interp ) {
-  case config::INTERP_NEAREST:
-    interpolator = new nearest_interpolator<float>();
+  sampler_interface<f32> *sampler;
+  switch ( cfg.sampler ) {
+  case config::SAMP_NEAREST:
+    sampler = new nearest_sampler<float>();
     break;
-  case config::INTERP_LINEAR:
-    interpolator = new linear_interpolator<float>();
+  case config::SAMP_LINEAR:
+    sampler = new linear_sampler<float>();
     break;
-  case config::INTERP_RRC: {
+  case config::SAMP_RRC: {
     float *coeffs;
-    if ( cfg.interp_ss == 0 ) {
-      // At least 16 discrete sampling points between symbols
-      cfg.interp_ss = max(1, (int)(16*cfg.Fm / cfg.Fs));
-      if ( cfg.verbose )
-	fprintf(stderr, "RRC interpolator: %d steps\n", cfg.interp_ss);
+    if ( cfg.rrc_steps == 0 ) {
+      // At least 64 discrete sampling points between symbols
+      cfg.rrc_steps = max(1, (int)(64*cfg.Fm / cfg.Fs));
     }
-    float Frrc = cfg.Fs * cfg.interp_ss;  // Sample freq of the RRC filter
+    if ( cfg.verbose )
+      fprintf(stderr, "RRC interpolator: %d steps\n", cfg.rrc_steps);
+    float Frrc = cfg.Fs * cfg.rrc_steps;  // Sample freq of the RRC filter
     float transition = (cfg.Fm/2) * cfg.rolloff;
     int order = cfg.rrc_rej * Frrc / (22*transition);
     int ncoeffs = filtergen::root_raised_cosine
       (order, cfg.Fm/Frrc, cfg.rolloff, &coeffs);
     if ( cfg.verbose )
-      fprintf(stderr, "RRC interpolator: %d coeffs.\n", ncoeffs);
+      fprintf(stderr, "RRC filter: %d coeffs.\n", ncoeffs);
     if ( cfg.debug ) filtergen::dump_filter("rrc", ncoeffs, coeffs);
-    interpolator = new fir_interpolator<float,float>
-      (ncoeffs, coeffs, cfg.interp_ss);
+    sampler = new fir_sampler<float,float>
+      (ncoeffs, coeffs, cfg.rrc_steps);
     break;
   }
   default:
     fatal("Interpolator not implemented");
   }
-  cstln_receiver<f32> demod(&sch, interpolator,
+  cstln_receiver<f32> demod(&sch, sampler,
 			    *p_preprocessed, p_symbols,
 			    &p_freq, &p_ss, &p_mer, &p_sampled);
   if ( cfg.standard == config::DVB_S ) {
@@ -552,7 +552,7 @@ int run(config &cfg) {
       cfg.Fs*1e-3f,
       (cfg.Ftune-cfg.Fm/2)*1e-3f, (cfg.Ftune+cfg.Fm/2)*1e-3f,
       slowmultiscope<f32>::chanspec::WRAP },
-    { &p_ss, "signal strength", "SS %3.0f", {255,0,0},
+    { &p_ss, "signal strength", "SS %3.3f", {255,0,0},
       1, 0,128, 
       slowmultiscope<f32>::chanspec::DEFAULT },
     { &p_mer, "MER", "MER %5.1f dB", {255,0,255},
@@ -590,9 +590,9 @@ int run(config &cfg) {
     else
       fprintf(stderr,
 	      "Output:\n"
-	      "  '_': frame with correct checksum\n"
-	      "  '!': frame with invalid checksum\n"
-	      "  '^': framing error\n");
+	      "  '_': HDLC frame with correct checksum\n"
+	      "  '!': HDLC frame with invalid checksum\n"
+	      "  '^': HDLC framing error\n");
   }
 
   sch.run();
@@ -880,9 +880,9 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --const C      QPSK (default), BPSK .. 32APSK (DVB-S2 only)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
 	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
-	  "  --interp       linear, rrc\n"
-	  "  --interp-ss N  Sub-sampling steps\n"
-	  "  --interp-rej K RRC filter rejection (defaut:10)\n"
+	  "  --sampler      nearest, linear, rrc\n"
+	  "  --rrc-steps N  RRC interpolation factor\n"
+	  "  --rrc-rej K    RRC filter rejection (defaut:10)\n"
 	  "  --roll-off A   RRC roll-off (default: 0.35)\n"
 	  "  --viterbi      Use Viterbi (CPU-intensive)\n"
 	  "  --hard-metric  Use Hamming distances with Viterbi\n"
@@ -987,15 +987,15 @@ int main(int argc, const char *argv[]) {
       cfg.resample_rej = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--decim") && i+1<argc )
       cfg.decim = atoi(argv[++i]);
-    else if ( ! strcmp(argv[i], "--interp") && i+1<argc ) {
+    else if ( ! strcmp(argv[i], "--sampler") && i+1<argc ) {
       ++i;
-      if      (!strcmp(argv[i],"nearest")) cfg.interp = config::INTERP_NEAREST;
-      else if (!strcmp(argv[i],"linear" )) cfg.interp = config::INTERP_LINEAR;
-      else if (!strcmp(argv[i],"rrc"    )) cfg.interp = config::INTERP_RRC;
+      if      (!strcmp(argv[i],"nearest")) cfg.sampler = config::SAMP_NEAREST;
+      else if (!strcmp(argv[i],"linear" )) cfg.sampler = config::SAMP_LINEAR;
+      else if (!strcmp(argv[i],"rrc"    )) cfg.sampler = config::SAMP_RRC;
       else usage(argv[0], stderr, 1);
     }
-    else if ( ! strcmp(argv[i], "--interp-ss") && i+1<argc )
-      cfg.interp_ss = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--rrc-steps") && i+1<argc )
+      cfg.rrc_steps = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--rrc-rej") && i+1<argc )
       cfg.rrc_rej = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--roll-off") && i+1<argc )
@@ -1003,7 +1003,7 @@ int main(int argc, const char *argv[]) {
     else if ( ! strcmp(argv[i], "--hq") ) {
       cfg.fastlock = true;
       cfg.viterbi = true;
-      cfg.interp = config::INTERP_RRC;
+      cfg.sampler = config::SAMP_RRC;
     }
     else if ( ! strcmp(argv[i], "--hs") )
       cfg.highspeed = true;
