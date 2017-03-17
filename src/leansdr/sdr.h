@@ -418,34 +418,34 @@ namespace leansdr {
   };  // cstln_lut
 
 
-  // INTERPOLATOR INTERFACE FOR CSTLN_RECEIVER
+  // SAMPLER INTERFACE FOR CSTLN_RECEIVER
   
   template<typename T>
-  struct interpolator_interface {
+  struct sampler_interface {
     virtual complex<T> interp(complex<T> *pin, float mu, float phase) = 0;
     virtual void update_freq(float freqw) { }  // 65536 = 1 Hz
     virtual int readahead() { return 0; }
   };
 
 
-  // NEAREST-SAMPLE INTERPOLATOR FOR CSTLN_RECEIVER
+  // NEAREST-SAMPLE SAMPLER FOR CSTLN_RECEIVER
   // Suitable for bandpass-filtered, oversampled signals only
 
   template<typename T>
-  struct nearest_interpolator : interpolator_interface<T> {
+  struct nearest_sampler : sampler_interface<T> {
     int readahead() { return 0; }
     complex<T> interp(complex<T> *pin, float mu, float phase) {
       return pin[0]*trig.expi(-phase);
     }
   private:
     trig16 trig;
-  };  // nearest_interpolator
+  };  // nearest_sampler
 
 
-  // LINEAR INTERPOLATOR FOR CSTLN_RECEIVER
+  // LINEAR SAMPLER FOR CSTLN_RECEIVER
 
   template<typename T>
-  struct linear_interpolator : interpolator_interface<T> {
+  struct linear_sampler : sampler_interface<T> {
     int readahead() { return 1; }
 
     complex<T> interp(complex<T> *pin, float mu, float phase) {
@@ -461,14 +461,14 @@ namespace leansdr {
   private:
     trig16 trig;
     float freqw;
-  };  // linear_interpolator
+  };  // linear_sampler
 
 
-  // FIR INTERPOLATOR FOR CSTLN_RECEIVER
+  // FIR SAMPLER FOR CSTLN_RECEIVER
 
   template<typename T, typename Tc>
-  struct fir_interpolator : interpolator_interface<T> {
-    fir_interpolator(int _ncoeffs, Tc *_coeffs, int _subsampling=1)
+  struct fir_sampler : sampler_interface<T> {
+    fir_sampler(int _ncoeffs, Tc *_coeffs, int _subsampling=1)
       : ncoeffs(_ncoeffs), coeffs(_coeffs), subsampling(_subsampling),
 	shifted_coeffs(new complex<T>[ncoeffs]),
 	update_freq_phase(0)
@@ -507,7 +507,7 @@ namespace leansdr {
     int subsampling;
     cf32 *shifted_coeffs;
     int update_freq_phase;
-  };  // fir_interpolator
+  };  // fir_sampler
 
 
   // CONSTELLATION RECEIVER
@@ -517,7 +517,7 @@ namespace leansdr {
 
   template<typename T>
   struct cstln_receiver : runnable {
-    interpolator_interface<T> *interpolator;
+    sampler_interface<T> *sampler;
     cstln_lut<256> *cstln;
     unsigned long meas_decimation;      // Measurement rate
     float omega, min_omega, max_omega;  // Samples per symbol
@@ -527,7 +527,7 @@ namespace leansdr {
     float kest;
     
     cstln_receiver(scheduler *sch,
-		   interpolator_interface<T> *_interpolator,
+		   sampler_interface<T> *_sampler,
 		   pipebuf< complex<T> > &_in,
 		   pipebuf<softsymbol> &_out,
 		   pipebuf<float> *_freq_out=NULL,
@@ -535,7 +535,7 @@ namespace leansdr {
 		   pipebuf<float> *_mer_out=NULL,
 		   pipebuf<cf32> *_cstln_out=NULL)
       : runnable(sch, "Constellation receiver"),
-	interpolator(_interpolator),
+	sampler(_sampler),
 	cstln(NULL),
 	meas_decimation(1048576),
 	allow_drift(false),
@@ -599,14 +599,14 @@ namespace leansdr {
       int max_meas = chunk_size/meas_decimation + 1;
       // Large margin on output_size because mu adjustments
       // can lead to more than chunk_size/min_omega symbols.
-      while ( in.readable() >= chunk_size+interpolator->readahead() &&
+      while ( in.readable() >= chunk_size+sampler->readahead() &&
 	      out.writable() >= chunk_size &&
 	      ( !freq_out  || freq_out ->writable()>=max_meas ) &&
 	      ( !ss_out    || ss_out   ->writable()>=max_meas ) &&
 	      ( !mer_out   || mer_out  ->writable()>=max_meas ) &&
 	      ( !cstln_out || cstln_out->writable()>=max_meas ) ) {
 	
-	interpolator->update_freq(freqw);
+	sampler->update_freq(freqw);
 
 	complex<T> *pin=in.rd(), *pin0=pin, *pend=pin+chunk_size;
 	softsymbol *pout=out.wr(), *pout0=pout;
@@ -621,7 +621,7 @@ namespace leansdr {
 	  if ( mu < 1 ) {
 	    // Here 0<=mu<1 is the fractional time of the next symbol
 	    // between pin and pin+1.
-	    sg = interpolator->interp(pin, mu, phase);
+	    sg = sampler->interp(pin, mu, phase);
 	    s = sg * agc_gain;
 	    
 	    // Constellation look-up
