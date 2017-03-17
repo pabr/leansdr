@@ -28,21 +28,16 @@ namespace leansdr {
     // Return pointer to buffer[*pdatasize], or NULL if no valid frame.
     // Return number of discarded bytes in *discarded.
     // Return number of checksum errors in *fcs_errors.
+    // *ppin will have increased by at least 1 (unless count==0).
 
     u8 *decode(u8 **ppin, int count,
-	       int *pdatasize, int *discarded, int *fcs_errors) {
-      *discarded = 0;
+	       int *pdatasize, int *hdlc_errors, int *fcs_errors) {
+      *hdlc_errors = 0;
       *fcs_errors = 0;
       *pdatasize = -1;
       u8 *pin=*ppin, *pend=pin+count;
       for ( ; pin<pend; ++pin ) {
-	if ( *pdatasize != -1 ) {
-	  // The previous loop found a complete frame
-	  *ppin = pin;
-	  return framebuf;
-	}
-	u8 byte_in = *pin;
-	byte_in ^= invertmask;
+	u8 byte_in = (*pin) ^ invertmask;
 	for ( int bits=8; bits--; byte_in<<=1 ) {
 	  u8 bit_in = byte_in & 128;
 	  shiftreg = (shiftreg>>1) | bit_in;
@@ -57,8 +52,8 @@ namespace leansdr {
 	      // Unstuff this 0
 	    } else if ( shiftreg == 0x7e ) {  // 01111110 HDLC flag
 	      if ( nbits_out != 7 ) {
-		if ( debug ) fprintf(stderr, "^");
-		++*discarded;
+		if ( debug ) fprintf(stderr, "?");
+		++*hdlc_errors;
 	      }
 	      nbits_out = 0;
 	      // Checksum
@@ -66,7 +61,7 @@ namespace leansdr {
 	      if ( framesize<2 || framesize<minframesize ||
 		   crc16!=crc16_check ) {
 		if ( debug ) fprintf(stderr, "!");
-		*discarded += framesize;
+		++*hdlc_errors;
 		// Do not report random noise as FCS errors
 		if ( framesize >= minframesize ) ++*fcs_errors;
 	      } else {
@@ -77,16 +72,16 @@ namespace leansdr {
 	      // Keep processing up to 7 remaining bits from byte_in.
 	      // Special cases 0111111 and 1111111 cannot affect *pdatasize.
 	    } else if ( shiftreg == 0xfe ) {  // 11111110 HDLC invalid
-	      if ( framesize && debug ) fprintf(stderr, "^");
-	      *discarded += framesize;
-	      inframe = 0;
+	      if ( framesize ) {
+		if ( debug ) fprintf(stderr, "^");
+		++*hdlc_errors;
+	      }
+	      inframe = false;
 	    } else {  // Data bit
 	      byte_out = (byte_out>>1) | bit_in;  // HDLC is LSB first
 	      ++nbits_out;
 	      if ( nbits_out == 8 ) {
-		if ( framesize == maxframesize )
-		  ++*discarded;
-		else {
+		if ( framesize < maxframesize ) {
 		  framebuf[framesize++] = byte_out;
 		  crc16_byte(byte_out);
 		}
@@ -95,6 +90,11 @@ namespace leansdr {
 	    }
 	  }  // inframe
 	}  // bits
+	if ( *pdatasize != -1 ) {
+	  // Found a complete frame
+	  *ppin = pin+1;
+	  return framebuf;
+	}
       }
       *ppin = pin;
       return NULL;
@@ -134,56 +134,121 @@ namespace leansdr {
 	      pipebuf<u8> &_in,   // Packed bits
 	      pipebuf<u8> &_out,  // Bytes
 	      int _minframesize,  // Including CRC, excluding HDLC flags.
-	      int _maxframesize)
+	      int _maxframesize,
+	      // Status
+	      pipebuf<int> *_lock_out=NULL,
+	      pipebuf<int> *_framecount_out=NULL,
+	      pipebuf<int> *_fcserrcount_out=NULL,
+	      pipebuf<int> *_hdlcbytecount_out=NULL,
+	      pipebuf<int> *_databytecount_out=NULL)
       : runnable(sch, "hdlc_sync"),
+	minframesize(_minframesize),
+	maxframesize(_maxframesize),
 	chunk_size(maxframesize+2),
 	in(_in), out(_out, _maxframesize+chunk_size),
-	maxframesize(_maxframesize),
-	current_sync(0), resync_phase(0), resync_period(32),
+	lock_out(opt_writer(_lock_out)),
+	framecount_out(opt_writer(_framecount_out)),
+	fcserrcount_out(opt_writer(_fcserrcount_out)),
+	hdlcbytecount_out(opt_writer(_hdlcbytecount_out)),
+	databytecount_out(opt_writer(_databytecount_out)),
+	cur_sync(0), resync_phase(0),
+	lock_state(false),
+	resync_period(32),
 	header16(false)
     {
-      for ( int s=0; s<NSYNCS; ++s )
-	syncs[s] = new hdlc_dec(minframesize, maxframesize, s!=0);
+      for ( int s=0; s<NSYNCS; ++s ) {
+	syncs[s].dec = new hdlc_dec(minframesize, maxframesize, s!=0);
+	for ( int h=0; h<NERRHIST; ++h ) syncs[s].errhist[h] = 0;
+      }
+      syncs[cur_sync].dec->debug = sch->debug;
+      errslot = 0;
     }
 
     void run() {
+      if ( ! opt_writable(lock_out)          ||
+	   ! opt_writable(framecount_out)    ||
+	   ! opt_writable(fcserrcount_out)   ||
+	   ! opt_writable(hdlcbytecount_out) ||
+	   ! opt_writable(databytecount_out) ) return;
+
+      bool previous_lock_state = lock_state;
+      int fcserrcount=0, framecount=0;
+      int hdlcbytecount=0, databytecount=0;
+
       // Note: hdlc_dec may already hold one frame ready for output.
       while ( in.readable() >= chunk_size &&
 	      out.writable() >= maxframesize+chunk_size ) {
 	if ( ! resync_phase ) {
 	  // Once every resync_phase, try all decoders
-	  int total_discarded[NSYNCS];
 	  for ( int s=0; s<NSYNCS; ++s ) {
-	    if ( s != current_sync ) syncs[s]->reset();
-	    total_discarded[s] = 0;
+	    if ( s != cur_sync ) syncs[s].dec->reset();
+	    syncs[s].errhist[errslot] = 0;
 	    for ( u8 *pin=in.rd(), *pend=pin+chunk_size; pin<pend; ) {
-	      int datasize, discarded, fcs_errors;
-	      u8 *f = syncs[s]->decode(&pin, pend-pin, &datasize,
-				       &discarded, &fcs_errors);
-	      total_discarded[s] += discarded;
-	      if ( s==current_sync && f ) output_frame(f, datasize);
+	      int datasize, hdlc_errors, fcs_errors;
+	      u8 *f = syncs[s].dec->decode(&pin, pend-pin, &datasize,
+					   &hdlc_errors, &fcs_errors);
+	      syncs[s].errhist[errslot] += hdlc_errors;
+	      if ( s == cur_sync ) {
+		if ( f ) {
+		  lock_state = true;
+		  output_frame(f, datasize);
+		  databytecount += datasize;
+		  ++framecount;
+		}
+		fcserrcount += fcs_errors;
+		framecount += fcs_errors;
+	      }
 	    }
 	  }
-	  int best = current_sync;
-	  for ( int s=0; s<NSYNCS; ++s )
-	    if ( total_discarded[s] < total_discarded[best] ) best = s;
-	  if ( best != current_sync ) {
-	    if ( sch->debug ) fprintf(stderr, "[%d->%d]", current_sync, best);
-	    syncs[current_sync]->debug = false;
-	    current_sync = best;
-	    syncs[current_sync]->debug = sch->debug;
+	  errslot = (errslot+1) % NERRHIST;
+	  // Switch to another sync option ?
+	  // Compare total error counts over about NERRHIST frames.
+	  int total_errors[NSYNCS];
+	  for ( int s=0; s<NSYNCS; ++s ) {
+	    total_errors[s] = 0;
+	    for ( int h=0; h<NERRHIST; ++h )
+	      total_errors[s] += syncs[s].errhist[h];
 	  }
-	} else {  // resync_phase
+	  int best = cur_sync;
+	  for ( int s=0; s<NSYNCS; ++s )
+	    if ( total_errors[s] < total_errors[best] ) best = s;
+	  if ( best != cur_sync ) {
+	    lock_state = false;
+	    if ( sch->debug ) fprintf(stderr, "[%d:%d->%d:%d]",
+				      cur_sync, total_errors[cur_sync],
+				      best, total_errors[best]);
+	    // No verbose messages on candidate syncs
+	    syncs[cur_sync].dec->debug = false;
+	    cur_sync = best;
+	    syncs[cur_sync].dec->debug = sch->debug;
+	  }
+	} else {
+	  // Use only the currently selected decoder
 	  for ( u8 *pin=in.rd(), *pend=pin+chunk_size; pin<pend; ) {
-	    int datasize, discarded, fcs_errors;
-	    u8 *f = syncs[current_sync]->decode(&pin, pend-pin, &datasize,
-						&discarded, &fcs_errors);
-	    if ( f ) output_frame(f, datasize);
+	    int datasize, hdlc_errors, fcs_errors;
+	    u8 *f = syncs[cur_sync].dec->decode(&pin, pend-pin, &datasize,
+						&hdlc_errors, &fcs_errors);
+	    if ( f ) {
+	      lock_state = true;
+	      output_frame(f, datasize);
+	      databytecount += datasize;
+	      ++framecount;
+	    }
+	    fcserrcount += fcs_errors;
+	    framecount += fcs_errors;
 	  }
 	}  // resync_phase
 	in.read(chunk_size);
+	hdlcbytecount += chunk_size;
 	if ( ++resync_phase >= resync_period ) resync_phase = 0;
       }  // Work to do
+
+      if ( lock_state != previous_lock_state )
+	opt_write(lock_out, lock_state?1:0);
+      opt_write(framecount_out, framecount);
+      opt_write(fcserrcount_out, fcserrcount);
+      opt_write(hdlcbytecount_out, hdlcbytecount);
+      opt_write(databytecount_out, databytecount);
     }
 
   private:
@@ -195,16 +260,26 @@ namespace leansdr {
       }
       memcpy(out.wr(), f, size);
       out.written(size);
+      opt_write(framecount_out, 1);
     }
 
+    int minframesize, maxframesize;
     int chunk_size;
     pipereader<u8> in;
     pipewriter<u8> out;
-    int minframesize, maxframesize;
-    static const int NSYNCS = 2;  // Two possible polarities
-    hdlc_dec *syncs[NSYNCS];
-    int current_sync;
+    pipewriter<int> *lock_out;
+    pipewriter<int> *framecount_out, *fcserrcount_out;
+    pipewriter<int> *hdlcbytecount_out, *databytecount_out;
+    static const int NSYNCS = 2;    // Two possible polarities
+    static const int NERRHIST = 2;  // Compare error counts over two frames
+    struct {
+      hdlc_dec *dec;
+      int errhist[NERRHIST];
+    } syncs[NSYNCS];
+    int errslot;
+    int cur_sync;
     int resync_phase;
+    bool lock_state;
   public:
     int resync_period;
     bool header16;  // Output length prefix
