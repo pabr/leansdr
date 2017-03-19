@@ -490,17 +490,21 @@ namespace leansdr {
     }
 
     void update_freq(float freqw) {
-      if ( ! update_freq_phase ) {
-	float f = freqw / subsampling;
-	for ( int i=0; i<ncoeffs; ++i )
-	  shifted_coeffs[i] = trig.expi(-f*(i-ncoeffs/2)) * coeffs[i];
-      }
-      // Throttling: Recompute one coeff per processed sample.
+      // Throttling: Update one coeff per 16 processed samples,
+      // to keep the overhead of freq tracking below about 10%.
       update_freq_phase += 128;  // chunk_size of cstln_receiver
-      if ( update_freq_phase >= ncoeffs ) update_freq_phase = 0;
+      if ( update_freq_phase >= ncoeffs*16 ) {
+	update_freq_phase = 0;
+	do_update_freq(freqw);
+      }
     }
 
   private:
+    void do_update_freq(float freqw) {
+      float f = freqw / subsampling;
+      for ( int i=0; i<ncoeffs; ++i )
+	shifted_coeffs[i] = trig.expi(-f*(i-ncoeffs/2)) * coeffs[i];
+    }
     trig16 trig;
     int ncoeffs;
     Tc *coeffs;
