@@ -492,9 +492,9 @@ namespace leansdr {
     void update_freq(float freqw) {
       // Throttling: Update one coeff per 16 processed samples,
       // to keep the overhead of freq tracking below about 10%.
-      update_freq_phase += 128;  // chunk_size of cstln_receiver
-      if ( update_freq_phase >= ncoeffs*16 ) {
-	update_freq_phase = 0;
+      update_freq_phase -= 128;  // chunk_size of cstln_receiver
+      if ( update_freq_phase <= 0  ) {
+	update_freq_phase = ncoeffs*16;
 	do_update_freq(freqw);
       }
     }
