@@ -600,7 +600,7 @@ int run(config &cfg) {
 
   sch.shutdown();
 
-  if ( cfg.verbose ) sch.dump();
+  if ( cfg.debug ) sch.dump();
   
   if ( cfg.gui && cfg.linger ) while ( 1 ) { sch.run(); usleep(10000); }
 
@@ -840,7 +840,7 @@ int run_highspeed(config &cfg) {
 
   sch.shutdown();
 
-  if ( cfg.verbose ) sch.dump();
+  if ( cfg.debug ) sch.dump();
   
   if ( cfg.gui && cfg.linger ) while ( 1 ) { sch.run(); usleep(10000); }
 
