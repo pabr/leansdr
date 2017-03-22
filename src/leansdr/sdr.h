@@ -192,7 +192,7 @@ namespace leansdr {
 	  phase -= decimation;
 	  complex<T> *p=in.rd(), *pend=p+window_size;
 	  float s2 = 0;
-	  float amin=1e99, amax=0;
+	  float amin=1e38, amax=0;
 	  for ( ; p<pend; ++p ) {
 	    float mag2 = (float)p->re*p->re + (float)p->im*p->im;
 	    s2 += mag2;
@@ -480,11 +480,23 @@ namespace leansdr {
     complex<T> interp(complex<T> *pin, float mu, float phase) {
       // Apply FIR filter with subsampling
       complex<T> acc(0, 0);
-      for ( complex<T> *pc = shifted_coeffs+(int)((1-mu)*subsampling),
-	      *pcend = shifted_coeffs+ncoeffs;
-	    pc < pcend;
-	    pc+=subsampling, ++pin )
-	acc = acc + (*pc)*(*pin);
+      complex<T> *pc = shifted_coeffs + (int)((1-mu)*subsampling);
+      complex<T> *pcend = shifted_coeffs + ncoeffs;
+      if ( subsampling == 1 ) {
+	// Explicit unrolling - much faster on ARM
+	while ( pc+8 < pcend ) {
+	  acc += (*pc++)*(*pin++);
+	  acc += (*pc++)*(*pin++);
+	  acc += (*pc++)*(*pin++);
+	  acc += (*pc++)*(*pin++);
+	  acc += (*pc++)*(*pin++);
+	  acc += (*pc++)*(*pin++);
+	  acc += (*pc++)*(*pin++);
+	  acc += (*pc++)*(*pin++);
+	}
+      }
+      for ( ; pc<pcend; pc+=subsampling,++pin ) 
+	acc += (*pc)*(*pin);
       // Derotate
       return trig.expi(-phase) * acc;
     }
