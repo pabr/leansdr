@@ -483,16 +483,12 @@ namespace leansdr {
       complex<T> *pc = shifted_coeffs + (int)((1-mu)*subsampling);
       complex<T> *pcend = shifted_coeffs + ncoeffs;
       if ( subsampling == 1 ) {
-	// Explicit unrolling - much faster on ARM
-	while ( pc+8 < pcend ) {
-	  acc += (*pc++)*(*pin++);
-	  acc += (*pc++)*(*pin++);
-	  acc += (*pc++)*(*pin++);
-	  acc += (*pc++)*(*pin++);
-	  acc += (*pc++)*(*pin++);
-	  acc += (*pc++)*(*pin++);
-	  acc += (*pc++)*(*pin++);
-	  acc += (*pc++)*(*pin++);
+	// Special case for heavily oversampled signals,
+	// where filtering is expensive.
+	while ( pc+16 < pcend ) {
+	  // gcc-4.9.2 can vectorize this form with NEON on ARM
+	  for ( int i=0; i<16; ++i)
+	    acc += (*pc++)*(*pin++);
 	}
       }
       for ( ; pc<pcend; pc+=subsampling,++pin ) 
