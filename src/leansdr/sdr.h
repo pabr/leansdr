@@ -422,7 +422,7 @@ namespace leansdr {
   
   template<typename T>
   struct sampler_interface {
-    virtual complex<T> interp(complex<T> *pin, float mu, float phase) = 0;
+    virtual complex<T> interp(const complex<T> *pin, float mu, float phase) = 0;
     virtual void update_freq(float freqw) { }  // 65536 = 1 Hz
     virtual int readahead() { return 0; }
   };
@@ -434,7 +434,7 @@ namespace leansdr {
   template<typename T>
   struct nearest_sampler : sampler_interface<T> {
     int readahead() { return 0; }
-    complex<T> interp(complex<T> *pin, float mu, float phase) {
+    complex<T> interp(const complex<T> *pin, float mu, float phase) {
       return pin[0]*trig.expi(-phase);
     }
   private:
@@ -448,7 +448,7 @@ namespace leansdr {
   struct linear_sampler : sampler_interface<T> {
     int readahead() { return 1; }
 
-    complex<T> interp(complex<T> *pin, float mu, float phase) {
+    complex<T> interp(const complex<T> *pin, float mu, float phase) {
       // Derotate pin[0] and pin[1]
       complex<T> s0 = pin[0]*trig.expi(-phase);
       complex<T> s1 = pin[1]*trig.expi(-(phase+freqw));
@@ -477,7 +477,7 @@ namespace leansdr {
 
     int readahead() { return ncoeffs-1; }
 
-    complex<T> interp(complex<T> *pin, float mu, float phase) {
+    complex<T> interp(const complex<T> *pin, float mu, float phase) {
       // Apply FIR filter with subsampling
       complex<T> acc(0, 0);
       complex<T> *pc = shifted_coeffs + (int)((1-mu)*subsampling);
