@@ -485,14 +485,15 @@ namespace leansdr {
       if ( subsampling == 1 ) {
 	// Special case for heavily oversampled signals,
 	// where filtering is expensive.
-	while ( pc+16 < pcend ) {
-	  // gcc-4.9.2 can vectorize this form with NEON on ARM
-	  for ( int i=0; i<16; ++i)
-	    acc += (*pc++)*(*pin++);
-	}
+	// gcc-4.9.2 can vectorize this form with NEON on ARM.
+	while ( pc < pcend )
+	  acc += (*pc++)*(*pin++);
+      } else {
+	// Not vectorized because the coefficients are not
+	// guaranteed to be contiguous in memory.
+	for ( ; pc<pcend; pc+=subsampling,++pin ) 
+	  acc += (*pc)*(*pin);
       }
-      for ( ; pc<pcend; pc+=subsampling,++pin ) 
-	acc += (*pc)*(*pin);
       // Derotate
       return trig.expi(-phase) * acc;
     }
