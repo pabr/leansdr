@@ -4,6 +4,7 @@
 #include <math.h>
 #include "leansdr/framework.h"
 #include "leansdr/math.h"
+#include "leansdr/os_math_compat.h"
 
 namespace leansdr {
 

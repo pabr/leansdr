@@ -3,6 +3,7 @@
 
 #include "leansdr/math.h"
 #include "leansdr/dsp.h"
+#include "leansdr/os_math_compat.h"
 
 namespace leansdr {
 
