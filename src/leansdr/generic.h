@@ -138,7 +138,7 @@ struct file_carrayprinter : runnable {
       complex<T> *pin=in.rd(), *pend=pin+n;
       for ( ; pin<pend; ++pin )
 	fprintf(fout, format, pin->re*scale, pin->im*scale);
-      fprintf(fout, tail);
+      fprintf(fout, "%s", tail);
       fflush(fout);
     }
     in.read(n);
