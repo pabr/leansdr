@@ -253,8 +253,8 @@ namespace leansdr {
     float current_freq;
     void set_freq(float f) {
       for ( int i=0; i<ncoeffs; ++i ) {
-	float c, s;
-	sincosf(2*M_PI*f*(i-ncoeffs/2), &s, &c);
+	float a = 2*M_PI * f * (i-ncoeffs/2);
+	float c=cosf(a), s=sinf(a);
 	// TBD Support T=complex
 	shifted_coeffs[i].re = coeffs[i] * c;
 	shifted_coeffs[i].im = coeffs[i] * s;
@@ -336,8 +336,8 @@ namespace leansdr {
     float current_freq;
     void set_freq(float f) {
       for ( int i=0; i<ncoeffs; ++i ) {
-	float c, s;
-	sincosf(2*M_PI*f*i, &s, &c);
+	float a = 2*M_PI * f * i;
+	float c=cosf(a), s=sinf(a);
 	// TBD Support T=complex
 	shifted_coeffs[i].re = coeffs[i] * c;
 	shifted_coeffs[i].im = coeffs[i] * s;

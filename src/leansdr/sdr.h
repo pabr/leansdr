@@ -873,15 +873,16 @@ namespace leansdr {
 	    s.im = (int)(p0r->im + (p1r->im-p0r->im)*mu);
 	    symbol_arg = fast_arg(s);
 #else  // Linear floating-point, for reference
-	    float cosph, sinph;
-	    sincosf(-(int)phase*M_PI/32768, &sinph, &cosph);
+	    float a0 = -(int)phase*M_PI/32768;
+	    float cosa0=cosf(a0), sina0=sinf(a0);
 	    complex<float>
-	      p0r(((float)pin[0].re-128)*cosph - ((float)pin[0].im-128)*sinph,
-		  ((float)pin[0].re-128)*sinph + ((float)pin[0].im-128)*cosph);
-	    sincosf(-(int)(phase+freqw)*M_PI/32768, &sinph, &cosph);
+	      p0r(((float)pin[0].re-128)*cosa0 - ((float)pin[0].im-128)*sina0,
+		  ((float)pin[0].re-128)*sina0 + ((float)pin[0].im-128)*cosa0);
+	    float a1 = -(int)(phase+freqw)*M_PI/32768;
+	    float cosa1=cosf(a1), sina1=sinf(a1);
 	    complex<float>
-	      p1r(((float)pin[1].re-128)*cosph - ((float)pin[1].im-128)*sinph,
-		  ((float)pin[1].re-128)*sinph + ((float)pin[1].im-128)*cosph);
+	      p1r(((float)pin[1].re-128)*cosa1 - ((float)pin[1].im-128)*sina1,
+		  ((float)pin[1].re-128)*sina1 + ((float)pin[1].im-128)*cosa1);
 	    s.re = (int)(128 + p0r.re + (p1r.re-p0r.re)*mu);
 	    s.im = (int)(128 + p0r.im + (p1r.im-p0r.im)*mu);
 	    symbol_arg = fast_arg(s);

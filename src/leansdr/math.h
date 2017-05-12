@@ -72,8 +72,11 @@ namespace leansdr {
   struct trig16 {
     complex<float> lut[65536];  // TBD static and shared
     trig16() {
-      for ( int a=0; a<65536; ++a )
-	sincosf(a*2*M_PI/65536, &lut[a].im, &lut[a].re);
+      for ( int a=0; a<65536; ++a ) {
+	float af = a * 2*M_PI / 65536;
+	lut[a].re = cosf(af);
+	lut[a].im = sinf(af);
+      }
     }
     inline const complex<float> &expi(unsigned short a) const {
       return lut[a];
