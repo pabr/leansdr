@@ -2,6 +2,7 @@
 #define LEANSDR_MATH_H
 
 #include <math.h>
+#include "leansdr/os_math_compat.h"
 
 namespace leansdr {
 
