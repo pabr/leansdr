@@ -14,6 +14,7 @@ namespace leansdr {
   typedef complex<u8> cu8;
   typedef complex<u16> cu16;
   typedef complex<s8> cs8;
+  typedef complex<s16> cs16;
 
 
   //////////////////////////////////////////////////////////////////////
