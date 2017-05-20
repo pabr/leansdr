@@ -27,7 +27,7 @@ using namespace leansdr;
 struct config {
   bool verbose, debug;
   bool highspeed;    // Demodulate raw u8 I/Q without preprocessing
-  enum { INPUT_U8, INPUT_F32 } input_format;
+  enum { INPUT_U8, INPUT_U16, INPUT_I16, INPUT_F32 } input_format;
   float float_scale; // Scaling factor for float data.
   bool loop_input;
   int input_buffer;  // Extra input buffer size
@@ -175,6 +175,25 @@ int run(config &cfg) {
     cconverter<u8,128, f32,0, 1,1> *r_convert =
       new cconverter<u8,128, f32,0, 1,1>(&sch, *p_stdin, p_rawiq);
   }
+  if ( cfg.input_format == config::INPUT_U16 ) {
+    pipebuf<cu16> *p_stdin =
+      new pipebuf<cu16>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
+    file_reader<cu16> *r_stdin =
+      new file_reader<cu16>(&sch, 0, *p_stdin);
+    r_stdin->loop = cfg.loop_input;
+    cconverter<u16, 2048, f32, 0, 1, 1> *r_convert =
+      new cconverter<u16, 2048, f32,0, 1, 1>(&sch, *p_stdin, p_rawiq);
+  }
+  if ( cfg.input_format == config::INPUT_I16 ) {
+    pipebuf<cs16> *p_stdin =
+      new pipebuf<cs16>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
+    file_reader<cs16> *r_stdin =
+      new file_reader<cs16>(&sch, 0, *p_stdin);
+    r_stdin->loop = cfg.loop_input;
+    cconverter<s16, 0, f32, 0, 1, 1> *r_convert =
+      new cconverter<s16, 0, f32,0, 1, 1>(&sch, *p_stdin, p_rawiq);
+  }
+
   if ( cfg.input_format == config::INPUT_F32 ) {
     pipebuf<cf32> *p_stdin =
       new pipebuf<cf32>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
@@ -856,6 +875,8 @@ void usage(const char *name, FILE *f, int c) {
   fprintf(f,
 	  "\nInput options:\n"
 	  "  --u8           Input format is 8-bit unsigned (rtl_sdr, default)\n"
+	  "  --u16          Input format is 16-bit unsigned\n"
+          "  --i16          Input format is 16-bi signed (LimeSDR)\n"
 	  "  --f32          Input format is 32-bit float (gqrx)\n"
 	  "  -f HZ          Input sample rate (default: 2.4e6)\n"
 	  "  --loop         Repeat (stdin must be a file)\n"
@@ -1030,6 +1051,10 @@ int main(int argc, const char *argv[]) {
 #endif
     else if ( ! strcmp(argv[i], "--f32") )
       cfg.input_format = config::INPUT_F32;
+    else if ( ! strcmp(argv[i], "--u16") )
+      cfg.input_format = config::INPUT_U16;
+    else if ( ! strcmp(argv[i], "--i16") )
+      cfg.input_format = config::INPUT_I16;
     else if ( ! strcmp(argv[i], "--u8") )
       cfg.input_format = config::INPUT_U8;
     else if ( ! strcmp(argv[i], "--float-scale") && i+1<argc )
