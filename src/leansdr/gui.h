@@ -422,6 +422,89 @@ namespace leansdr {
   };
   
   template<typename T>
+  struct rfscope : runnable {
+    unsigned long size;
+    unsigned long decimation;
+    float db0, dbrange, bw;
+    rfscope(scheduler *sch, pipebuf< complex<T> > & _in,
+	    const char *_name=NULL)
+      : runnable(sch, _name?_name:_in.name),
+	size(4096), decimation(DEFAULT_GUI_DECIMATION),
+	db0(-25), dbrange(50), bw(0.05),
+	in(_in), phase(0), g(sch, name), fft(NULL), filtered(NULL) {
+    }
+    void run() {
+      while ( in.readable() >= size ) {
+	if ( ! phase ) do_fft(in.rd());
+	in.read(size);
+	if ( ++phase >= decimation ) phase = 0;
+      }
+    }
+  private:
+    pipereader< complex<T> > in;
+    int phase;
+    gfx g;
+    cfft_engine<float> *fft;
+    float *filtered;
+
+    void do_fft(complex<T> *input) {
+      g.events();
+      draw_begin();
+      if ( !fft || fft->n!=size ) {
+	if ( fft ) delete fft;
+	fft = new cfft_engine<float>(size);
+      }
+      // Convert to complex<float> and transform
+      complex<T> *pin=input, *pend=pin+size;
+      complex<float> data[size], *pout=data;
+      for ( int x=0; pin<pend; ++pin,++pout,++x ) {
+	pout->re = (float)pin->re;
+	pout->im = (float)pin->im;
+      }
+      fft->inplace(data, true);
+      float amp2[size];
+      for ( int i=0; i<size; ++i ) {
+	complex<float> &v = data[i];;
+	amp2[i] = (v.re*v.re + v.im*v.im)*size;
+      }
+      if ( ! filtered ) {
+	filtered = new float[size];
+	for ( int i=0; i<size; ++i ) filtered[i] = amp2[i];
+      }
+      float bwcomp = 1 - bw;
+      g.setfg(0, 255, 0);
+      for ( int i=0; i<size; ++i ) {
+	filtered[i] = amp2[i]*bw + filtered[i]*bwcomp;
+	float db = filtered[i] ? 10 * logf(filtered[i])/logf(10) : db0;
+	int x = ((i<size/2)?i+size/2:i-size/2) * g.w / size;
+	int y = g.h-1 - (db-db0)*g.h/dbrange;
+	g.line(x, g.h-1, x, y);
+      }
+      if ( g.buttons ) {
+	char s[256];
+	float freq = (float)(g.mx-g.w/2) / g.w;
+	float val = db0 + (float)((g.h-1)-g.my)*dbrange/g.h;
+	sprintf(s, "%f Hz   %f dB", freq, val);
+	g.text(16, 16, s);
+      }
+      g.show();
+      g.sync();
+    }
+    void draw_begin() {
+      g.clear();
+      // dB scale
+      g.setfg(64, 64, 64);
+      for ( float db=floorf(db0); db<db0+dbrange; ++db ) {
+	int y = g.h-1 - (db-db0)*g.h/dbrange;
+	g.line(0,y, g.w-1,y);
+      }
+      // DC line
+      g.setfg(255, 255, 255);
+      g.line(g.w/2,0, g.w/2,g.h);
+    }
+  };
+
+  template<typename T>
   struct genscope : runnable {
     struct render {
       int x, y;
