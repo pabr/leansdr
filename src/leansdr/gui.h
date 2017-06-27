@@ -28,9 +28,9 @@ namespace leansdr {
     Pixmap dbuf;
     gfx(scheduler *sch, const char *name) {
       window_placement *wp;
-      for ( wp=sch->windows; wp->name; ++wp )
+      for ( wp=sch->windows; wp && wp->name; ++wp )
 	if ( ! strcmp(wp->name, name) ) break;
-      if ( wp->name )
+      if ( wp && wp->name )
 	init(wp->name, wp->x, wp->y, wp->w, wp->h);
       else {
 	fprintf(stderr, "No placement hints for window '%s'\n", name);
