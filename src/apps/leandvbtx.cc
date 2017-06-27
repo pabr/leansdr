@@ -41,15 +41,23 @@ private:
 };
 
 struct config {
+  float power;
+  bool agc;
   int interp;
   int decim;
+  float rolloff;
+  bool verbose, debug;
   config()
-    : interp(2), decim(1)
+    : power(1.0), agc(false),
+      interp(2), decim(1), rolloff(0.35),
+    verbose(false), debug(false)
   { }
 };
     
 void run(config &cfg) {
   scheduler sch;
+  sch.verbose = cfg.verbose;
+  sch.debug = cfg.debug;
 
   unsigned long BUF_PACKETS = 12;  // TBD Reduce copying
   unsigned long BUF_BYTES = SIZE_RSPACKET*12;
@@ -71,7 +79,7 @@ void run(config &cfg) {
   pipebuf< rspacket<u8> > p_rspackets(&sch, "RS-enc packets", BUF_PACKETS);
   rs_encoder r_rsenc(&sch, p_rtspackets, p_rspackets);
 
-  // PACKETS TO BYTES
+  // INTERLEAVER
 
   pipebuf<u8> p_mpegbytes(&sch, "mpegbytes", BUF_BYTES);
   interleaver r_inter(&sch, p_rspackets, p_mpegbytes);
@@ -90,20 +98,21 @@ void run(config &cfg) {
 
   // RESAMPLER
 
-  if ( sch.verbose )
-    fprintf(stderr, "Resampling rate: %d/%d\n", cfg.interp, cfg.decim);
   pipebuf<cf32> p_interp(&sch, "interpolated", BUF_BASEBAND);
-  float Fcut = 0.5 * (1.0) / cfg.interp;
-  int order = cfg.interp*10;
-  order = ((order+1)/2) * 2;
+  float Fm = 1.0 / cfg.interp;
+  int order = cfg.interp * 10;
   float *coeffs;
-  int ncoeffs = filtergen::lowpass(order, Fcut, &coeffs);
-  filtergen::normalize_power(ncoeffs, coeffs, sqrtf(cfg.interp));
-#if 0
-  fprintf(stderr, "COEFFS[%d]=", ncoeffs);
-  for ( int i=0; i<ncoeffs; ++i ) fprintf(stderr, " %f", coeffs[i]);
-  fprintf(stderr, "\n");
-#endif
+  int ncoeffs = filtergen::root_raised_cosine
+    (order, Fm, cfg.rolloff, &coeffs);
+  // This yields the desired power level even without AGC.
+  filtergen::normalize_power(ncoeffs, coeffs, cfg.power/cstln_amp);
+
+  if ( sch.verbose )
+    fprintf(stderr, "Interpolation: ratio %d/%d, rolloff %f, %d coeffs\n",
+	    cfg.interp, cfg.decim, cfg.rolloff, ncoeffs);
+  if ( sch.debug )
+    filtergen::dump_filter("rrc", ncoeffs, coeffs);
+
   fir_resampler<cf32,float>
     r_resampler(&sch, ncoeffs, coeffs,
 		p_iqsymbols, p_interp, cfg.interp, 1);
@@ -111,23 +120,24 @@ void run(config &cfg) {
   pipebuf<cf32> p_resampled(&sch, "resampled", BUF_BASEBAND);
   decimator<cf32> r_decim(&sch, cfg.decim, p_interp, p_resampled);
 
-#if 0
-  // SS ESTIMATOR
+  pipebuf<cf32> *tail = &p_resampled;
 
-  pipebuf<f32> p_ss(&sch, "ss", BUF_BASEBAND);
-  pipebuf<f32> p_ampmin(&sch, "ampmin", BUF_BASEBAND);
-  pipebuf<f32> p_ampmax(&sch, "ampmax", BUF_BASEBAND);
-  ss_amp_estimator<f32> r_ssest(&sch, p_resampled, p_ss, p_ampmin, p_ampmax);
-  r_ssest.window_size = 4096;
-  r_ssest.decimation = 4096 * 256;
-  file_printer<f32> r_print_ss(&sch, "TXSS %f\n", p_ss, 2);
-  file_printer<f32> r_print_ampmin(&sch, "TXAMPMIN %f\n", p_ampmin, 2);
-  file_printer<f32> r_print_ampmax(&sch, "TXAMPMAX %f\n", p_ampmax, 2);
-#endif
+  // AGC
+
+  if ( cfg.agc ) {
+    pipebuf<cf32> *p_agc =
+      new pipebuf<cf32>(&sch, "AGC", BUF_BASEBAND);
+    simple_agc<f32> *r_agc =
+      new simple_agc<f32>(&sch, *tail, *p_agc);
+    r_agc->out_rms = cfg.power / sqrtf(cfg.interp);
+    // Adjust bandwidth for large interpolation ratios.
+    r_agc->bw = 0.001 * cfg.decim / cfg.interp;
+    tail = p_agc;
+  }
 
   // IQ ON STDOUT
 
-  file_writer<cf32> r_stdout(&sch, p_resampled, 1);
+  file_writer<cf32> r_stdout(&sch, *tail, 1);
 
   sch.run();
   sch.shutdown();
@@ -143,6 +153,10 @@ void usage(const char *name, FILE *f, int c) {
   fprintf
     (f, "\nOptions:"
      "  -f INTERP[/DECIM]        Samples per symbols (default: 2)\n"
+     "  --roll-off R             RRC roll-off (defalt: 0.35)\n"
+     "  --power P                Output power (dB)\n"
+     "  --agc                    Better regulation of output power\n"
+     "  -v                       Verbose output\n"
      );
   exit(c);
 }
@@ -153,12 +167,22 @@ int main(int argc, char *argv[]) {
   for ( int i=1; i<argc; ++i ) {
     if      ( ! strcmp(argv[i], "-h") )
       usage(argv[0], stdout, 0);
+    else if ( ! strcmp(argv[i], "-v") )
+      cfg.verbose = true;
+    else if ( ! strcmp(argv[i], "-d") )
+      cfg.debug = true;
     else if ( ! strcmp(argv[i], "-f") && i+1<argc ) {
       ++i;
       cfg.decim = 1;
       if ( sscanf(argv[i], "%d/%d", &cfg.interp, &cfg.decim) < 1 )
 	usage(argv[0], stderr, 1);
     }
+    else if ( ! strcmp(argv[i], "--roll-off") && i+1<argc )
+      cfg.rolloff = atof(argv[++i]);
+    else if ( ! strcmp(argv[i], "--power") && i+1<argc )
+      cfg.power = expf(logf(10)*atof(argv[++i])/20);
+    else if ( ! strcmp(argv[i], "--agc") )
+      cfg.agc = true;
     else 
       usage(argv[0], stderr, 1);
   }
