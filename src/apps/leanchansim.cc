@@ -191,7 +191,7 @@ void usage(const char *name, FILE *f, int c) {
 	  );
   fprintf(f,
 	  "\nNoise options:\n"
-	  "  --awgn STDDEV      Add white gaussian noise\n"
+	  "  --awgn STDDEV      Add white gaussian noise (dB)\n"
 	  );
   fprintf(f,
 	  "\nOutput options:\n"
@@ -224,7 +224,7 @@ int main(int argc, char *argv[]) {
       cfg.scale = atof(argv[++i]);
     // Noise
     else if ( ! strcmp(argv[i], "--awgn") && i+1<argc )
-      cfg.awgn = atof(argv[++i]);
+      cfg.awgn = expf(logf(10)*atof(argv[++i])/20);
     else if ( ! strcmp(argv[i], "--deterministic") )
       cfg.deterministic = true;
     // Drift
