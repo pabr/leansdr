@@ -10,9 +10,11 @@ namespace leansdr {
 
   typedef float f32;
 
-  typedef complex<f32> cf32;
   typedef complex<u8> cu8;
   typedef complex<s8> cs8;
+  typedef complex<u16> cu16;
+  typedef complex<s16> cs16;
+  typedef complex<f32> cf32;
 
 
   //////////////////////////////////////////////////////////////////////
