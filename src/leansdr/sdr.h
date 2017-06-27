@@ -215,6 +215,48 @@ namespace leansdr {
     unsigned long phase;
   };
   
+  // AGC
+
+  template<typename T>
+  struct simple_agc : runnable {
+    float out_rms;    // Desired RMS output power
+    float bw;         // Bandwidth
+    float estimated;  // Input power
+    simple_agc(scheduler *sch,
+	       pipebuf< complex<T> > &_in,
+	       pipebuf< complex<T> > &_out)
+      : runnable(sch, "AGC"),
+	out_rms(1), bw(0.001), estimated(0),
+	in(_in), out(_out) {
+    }
+  private:
+    pipereader< complex<T> > in;
+    pipewriter< complex<T> > out;
+    const int chunk_size = 128;
+    void run() {
+      while ( in.readable() >= chunk_size &&
+	      out.writable() >= chunk_size ) {
+	complex<T> *pin=in.rd(), *pend=pin+chunk_size;
+	float amp2 = 0;
+	for ( ; pin<pend; ++pin ) amp2 += pin->re*pin->re + pin->im*pin->im;
+	amp2 /= chunk_size;
+	if ( ! estimated ) estimated = amp2;
+	estimated = estimated*(1-bw) + amp2*bw;
+	float gain = estimated ? out_rms / sqrtf(estimated) : 0;
+	pin = in.rd();
+	complex<T> *pout = out.wr();
+	float bwcomp = 1 - bw;
+	for ( ; pin<pend; ++pin,++pout ) {
+	  pout->re = pin->re * gain;
+	  pout->im = pin->im * gain;
+	}
+	in.read(chunk_size);
+	out.written(chunk_size);
+      }
+    }
+  };  // simple_agc
+
+
   typedef unsigned short u_angle;  //  [0,2PI[ in 65536 steps
   typedef signed short s_angle;  // [-PI,PI[ in 65536 steps
 
