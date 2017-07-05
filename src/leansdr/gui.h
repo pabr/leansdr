@@ -425,11 +425,18 @@ namespace leansdr {
   struct rfscope : runnable {
     unsigned long size;
     unsigned long decimation;
-    float db0, dbrange, bw;
+    float Fs;  // Sampling freq for display (Hz)
+    float Fc;  // Center freq for display (Hz)
+    int ncursors;
+    float *cursors;     // Cursor frequencies
+    float hzoom;        // Horizontal zoom factor
+    float db0, dbrange; // Vertical range db0 .. db0+dbrange
+    float bw;           // Smoothing bandwidth
     rfscope(scheduler *sch, pipebuf< complex<T> > & _in,
 	    const char *_name=NULL)
       : runnable(sch, _name?_name:_in.name),
 	size(4096), decimation(DEFAULT_GUI_DECIMATION),
+	Fs(1), Fc(0), ncursors(0), hzoom(1),
 	db0(-25), dbrange(50), bw(0.05),
 	in(_in), phase(0), g(sch, name), fft(NULL), filtered(NULL) {
     }
@@ -476,16 +483,24 @@ namespace leansdr {
       for ( int i=0; i<size; ++i ) {
 	filtered[i] = amp2[i]*bw + filtered[i]*bwcomp;
 	float db = filtered[i] ? 10 * logf(filtered[i])/logf(10) : db0;
-	int x = ((i<size/2)?i+size/2:i-size/2) * g.w / size;
+	int is = (i<size/2) ? i : i-size;
+	int x = g.w/2 + is*hzoom*g.w/size;
 	int y = g.h-1 - (db-db0)*g.h/dbrange;
 	g.line(x, g.h-1, x, y);
       }
       if ( g.buttons ) {
 	char s[256];
-	float freq = (float)(g.mx-g.w/2) / g.w;
+	float freq = Fc + Fs*(g.mx-g.w/2)/g.w/hzoom;
 	float val = db0 + (float)((g.h-1)-g.my)*dbrange/g.h;
-	sprintf(s, "%f Hz   %f dB", freq, val);
+	sprintf(s, "%f.3 Hz   %f.2 dB", freq, val);
+	g.setfg(255, 255, 255);
 	g.text(16, 16, s);
+      }
+      // Draw cursors
+      g.setfg(255, 255, 0);
+      for ( int i=0; i<ncursors; ++i ) {
+	int x = g.w/2 + (cursors[i]-Fc)*hzoom*g.w/Fs;
+	g.line(x,0, x,g.h-1);
       }
       g.show();
       g.sync();
