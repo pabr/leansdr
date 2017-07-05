@@ -52,22 +52,25 @@ namespace leansdr {
 	      // Unstuff this 0
 	    } else if ( shiftreg == 0x7e ) {  // 01111110 HDLC flag
 	      if ( nbits_out != 7 ) {
-		if ( debug ) fprintf(stderr, "?");
+		// Not at byte boundary
+		if ( debug ) fprintf(stderr, "^");
 		++*hdlc_errors;
+	      } else {
+		// Checksum
+		crc16 ^= 0xffff;
+		if ( framesize<2 || framesize<minframesize ||
+		     crc16!=crc16_check ) {
+		  if ( debug ) fprintf(stderr, "!");
+		  ++*hdlc_errors;
+		  // Do not report random noise as FCS errors
+		  if ( framesize >= minframesize ) ++*fcs_errors;
+		} else {
+		  if ( debug ) fprintf(stderr, "_");
+		  // This will trigger output, but we finish the byte first.
+		  *pdatasize = framesize-2;
+		}
 	      }
 	      nbits_out = 0;
-	      // Checksum
-	      crc16 ^= 0xffff;
-	      if ( framesize<2 || framesize<minframesize ||
-		   crc16!=crc16_check ) {
-		if ( debug ) fprintf(stderr, "!");
-		++*hdlc_errors;
-		// Do not report random noise as FCS errors
-		if ( framesize >= minframesize ) ++*fcs_errors;
-	      } else {
-		if ( debug ) fprintf(stderr, "_");
-		*pdatasize = framesize-2;
-	      }
 	      begin_frame();
 	      // Keep processing up to 7 remaining bits from byte_in.
 	      // Special cases 0111111 and 1111111 cannot affect *pdatasize.
