@@ -27,7 +27,11 @@ using namespace leansdr;
 struct config {
   bool verbose, debug;
   bool highspeed;    // Demodulate raw u8 I/Q without preprocessing
-  enum { INPUT_U8, INPUT_F32 } input_format;
+  enum {
+    INPUT_U8, INPUT_S8,
+    INPUT_U16, INPUT_S16,
+    INPUT_F32
+  } input_format;
   float float_scale; // Scaling factor for float data.
   bool loop_input;
   int input_buffer;  // Extra input buffer size
@@ -166,7 +170,8 @@ int run(config &cfg) {
 
   pipebuf<cf32> p_rawiq(&sch, "rawiq", BUF_BASEBAND);
 
-  if ( cfg.input_format == config::INPUT_U8 ) {
+  switch ( cfg.input_format ) {
+  case config::INPUT_U8: {
     pipebuf<cu8> *p_stdin =
       new pipebuf<cu8>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
     file_reader<cu8> *r_stdin =
@@ -174,8 +179,39 @@ int run(config &cfg) {
     r_stdin->loop = cfg.loop_input;
     cconverter<u8,128, f32,0, 1,1> *r_convert =
       new cconverter<u8,128, f32,0, 1,1>(&sch, *p_stdin, p_rawiq);
+    break;
   }
-  if ( cfg.input_format == config::INPUT_F32 ) {
+  case config::INPUT_S8: {
+    pipebuf<cs8> *p_stdin =
+      new pipebuf<cs8>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
+    file_reader<cs8> *r_stdin =
+      new file_reader<cs8>(&sch, 0, *p_stdin);
+    r_stdin->loop = cfg.loop_input;
+    cconverter<s8,0, f32,0, 1,1> *r_convert =
+      new cconverter<s8,0, f32,0, 1,1>(&sch, *p_stdin, p_rawiq);
+    break;
+  }
+  case config::INPUT_U16: {
+    pipebuf<cu16> *p_stdin =
+      new pipebuf<cu16>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
+    file_reader<cu16> *r_stdin =
+      new file_reader<cu16>(&sch, 0, *p_stdin);
+    r_stdin->loop = cfg.loop_input;
+    cconverter<u16,32768, f32,0, 1,1> *r_convert =
+      new cconverter<u16,32768, f32,0, 1,1>(&sch, *p_stdin, p_rawiq);
+    break;
+  }
+  case config::INPUT_S16: {
+    pipebuf<cs16> *p_stdin =
+      new pipebuf<cs16>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
+    file_reader<cs16> *r_stdin =
+      new file_reader<cs16>(&sch, 0, *p_stdin);
+    r_stdin->loop = cfg.loop_input;
+    cconverter<s16,0, f32,0, 1,1> *r_convert =
+      new cconverter<s16,0, f32,0, 1,1>(&sch, *p_stdin, p_rawiq);
+    break;
+  }
+  case config::INPUT_F32: {
     pipebuf<cf32> *p_stdin =
       new pipebuf<cf32>(&sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
     file_reader<cf32> *r_stdin =
@@ -183,6 +219,10 @@ int run(config &cfg) {
     r_stdin->loop = cfg.loop_input;
     scaler<float,cf32,cf32> *r_scale =
       new scaler<float,cf32,cf32>(&sch, cfg.float_scale, *p_stdin, p_rawiq);
+    break;
+  }
+  default:
+    fail("Input format not implemented");
   }
 
 #ifdef GUI
@@ -1028,10 +1068,16 @@ int main(int argc, const char *argv[]) {
     else if ( ! strcmp(argv[i], "--linger") )
       cfg.linger = true;
 #endif
-    else if ( ! strcmp(argv[i], "--f32") )
-      cfg.input_format = config::INPUT_F32;
     else if ( ! strcmp(argv[i], "--u8") )
       cfg.input_format = config::INPUT_U8;
+    else if ( ! strcmp(argv[i], "--s8") )
+      cfg.input_format = config::INPUT_S8;
+    else if ( ! strcmp(argv[i], "--u16") )
+      cfg.input_format = config::INPUT_U16;
+    else if ( ! strcmp(argv[i], "--s16") )
+      cfg.input_format = config::INPUT_S16;
+    else if ( ! strcmp(argv[i], "--f32") )
+      cfg.input_format = config::INPUT_F32;
     else if ( ! strcmp(argv[i], "--float-scale") && i+1<argc )
       cfg.float_scale = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--loop") )
