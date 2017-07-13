@@ -232,7 +232,7 @@ namespace leansdr {
   private:
     pipereader< complex<T> > in;
     pipewriter< complex<T> > out;
-    const int chunk_size = 128;
+    static const int chunk_size = 128;
     void run() {
       while ( in.readable() >= chunk_size &&
 	      out.writable() >= chunk_size ) {
