@@ -399,7 +399,20 @@ namespace leansdr {
       s_angle phase_error;
     };
     inline result *lookup(float I, float Q) {
-      // float-to-s8 saturates on some platorms, which is good.
+      // Handling of overflows beyond the lookup table:
+      // - For BPSK/QPSK/8PSK we only care about the phase,
+      //   so the following is fine.
+      // - For amplitude modulations this is not appropriate.
+      //   However, if there is enough noise to cause overflow,
+      //   demodulation would probably fail anyway.
+      //
+      // Comment-out for better throughput at high SNR.
+#if 1
+      while ( I<-128 || I>127 || Q<-128 || Q>127 ) {
+	I *= 0.5;
+	Q *= 0.5;
+      }
+#endif
       return &lut[(u8)(s8)I][(u8)(s8)Q];
     }
     inline result *lookup(int I, int Q) {
