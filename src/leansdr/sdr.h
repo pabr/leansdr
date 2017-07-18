@@ -592,6 +592,7 @@ namespace leansdr {
     unsigned long meas_decimation;      // Measurement rate
     float omega, min_omega, max_omega;  // Samples per symbol
     float freqw, min_freqw, max_freqw;  // Freq offs (65536 = 1 Hz)
+    float pll_adjustment;
     bool allow_drift;                   // Follow carrier beyond safe limits
     static const unsigned int chunk_size = 128;
     float kest;
@@ -608,6 +609,7 @@ namespace leansdr {
 	sampler(_sampler),
 	cstln(NULL),
 	meas_decimation(1048576),
+	pll_adjustment(1.0),
 	allow_drift(false),
 	kest(0.01),
 	in(_in), out(_out, chunk_size),
@@ -663,7 +665,7 @@ namespace leansdr {
       
       // Magic constants that work with the qa recordings.
       float freq_alpha = 0.04;
-      float freq_beta = 0.0012 / omega;
+      float freq_beta = 0.0012 / omega * pll_adjustment;
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
       
       int max_meas = chunk_size/meas_decimation + 1;
@@ -838,6 +840,7 @@ namespace leansdr {
     unsigned long meas_decimation;      // Measurement rate
     float omega, min_omega, max_omega;  // Samples per symbol
     signed long freqw, min_freqw, max_freqw;  // Freq offs (angle per sample)
+    float pll_adjustment;
     bool allow_drift;                   // Follow carrier beyond safe limits
     static const unsigned int chunk_size = 128;
     
@@ -848,6 +851,7 @@ namespace leansdr {
 		       pipebuf< complex<T> > *_cstln_out=NULL)
       : runnable(sch, "Fast QPSK receiver"),
 	meas_decimation(1048576),
+	pll_adjustment(1.0),
 	allow_drift(false),
 	in(_in), out(_out, chunk_size),
 	mu(0), phase(0),
@@ -886,7 +890,7 @@ namespace leansdr {
     void run() {
       // Magic constants that work with the qa recordings.
       signed long freq_alpha = 0.04 * 65536;
-      signed long freq_beta = 0.0012 * 256 * 65536 / omega;
+      signed long freq_beta = 0.0012 * 256 * 65536 / omega * pll_adjustment;
       if ( ! freq_beta ) fail("Excessive oversampling");
 
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;

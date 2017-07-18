@@ -447,6 +447,10 @@ int run(config &cfg) {
 	      demod.min_freqw*cfg.Fs/65536/1000,
 	      demod.max_freqw*cfg.Fs/65536/1000);
   }
+  if ( cfg.viterbi ) {
+    if ( cfg.verbose ) fprintf(stderr, "PLL parameters for low SNR\n");
+    demod.pll_adjustment /= 6;
+  }
   demod.meas_decimation = decimation(cfg.Fs, cfg.Finfo);
 
   // TRACKING FILTERS
