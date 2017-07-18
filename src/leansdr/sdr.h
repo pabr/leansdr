@@ -467,7 +467,7 @@ namespace leansdr {
 	    else if ( m[2]<=m[3] ) best = 2;
 	    else best = 3;
 	    for ( int s=0; s<4; ++s )
-	      m[s] = hamming_weight((unsigned long)(s^best));
+	      m[s] = hamming_weight((uint8_t)(s^best));
 	  }
 	}
     }
