@@ -129,7 +129,7 @@ void run(config &cfg) {
       new pipebuf<cf32>(&sch, "AGC", BUF_BASEBAND);
     simple_agc<f32> *r_agc =
       new simple_agc<f32>(&sch, *tail, *p_agc);
-    r_agc->out_rms = cfg.power / sqrtf(cfg.interp);
+    r_agc->out_rms = cfg.power / sqrtf((float)cfg.interp/cfg.decim);
     // Adjust bandwidth for large interpolation ratios.
     r_agc->bw = 0.001 * cfg.decim / cfg.interp;
     tail = p_agc;
