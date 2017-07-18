@@ -1,6 +1,8 @@
 #ifndef LEANSDR_DVB_H
 #define LEANSDR_DVB_H
 
+#include <stdint.h>
+
 #include "leansdr/viterbi.h"
 #include "leansdr/convolutional.h"
 #include "leansdr/sdr.h"
@@ -99,17 +101,17 @@ namespace leansdr {
     deconvol_sync(scheduler *sch,
 		  pipebuf<softsymbol> &_in,
 		  pipebuf<Tbyte> &_out,
-		  unsigned long gX, unsigned long gY,
-		  unsigned long pX, unsigned long pY)
+		  uint32_t gX, uint32_t gY,
+		  uint32_t pX, uint32_t pY)
       : runnable(sch, "deconvol_sync"),
 	fastlock(false),
 	in(_in), out(_out,SIZE_RSPACKET),
 	skip(0) {
-      conv = new unsigned long[2];
+      conv = new uint32_t[2];
       conv[0] = gX;
       conv[1] = gY;
       nG = 2;
-      punct = new unsigned long[2];
+      punct = new uint32_t[2];
       punct[0] = pX;
       punct[1] = pY;
       punctperiod = 0;
@@ -128,10 +130,10 @@ namespace leansdr {
       locked = &syncs[0];
     }
 
-    typedef unsigned long long signal_t;
-    typedef unsigned long long iq_t;
+    typedef uint64_t signal_t;
+    typedef uint64_t iq_t;
 
-    static int log2(unsigned long long x) {
+    static int log2(uint64_t x) {
       int n = -1;
       for ( ; x; ++n,x>>=1 ) ;
       return n;
@@ -209,7 +211,7 @@ namespace leansdr {
       
       // Alternate polynomials for fastlock
       for ( int b=0; b<punctperiod; ++b ) {
-	unsigned long long d=deconv[b], d2=d;
+	uint64_t d=deconv[b], d2=d;
 	// 1/2
 	if ( d == 0x00000000000003baLL ) d2 = 0x0000000000038ccaLL;
 	// 2/3
@@ -242,18 +244,19 @@ namespace leansdr {
       if ( sch->debug ) {
 	for ( int b=0; b<punctperiod; ++b )
 	  fprintf(stderr, "deconv[%d]=0x%016llx %d taps / %d bits\n",
-		  b, deconv[b], hamming_weight(deconv[b]), log2(deconv[b])+1);
+		  b, (unsigned long long)deconv[b],
+		  hamming_weight(deconv[b]), log2(deconv[b])+1);
       }
 
       // Sanity check
       for ( int b=0; b<punctperiod; ++b ) {
 	for ( int i=0; i<maxsbits; ++i ) {
 	  iq_t iq = convolve((iq_t)1<<(LATENCY+i));
-	  unsigned long expect = (b==i) ? 1 : 0;
-	  unsigned long d = parity(iq&deconv[b]);
+	  int expect = (b==i) ? 1 : 0;
+	  int d = parity(iq&deconv[b]);
 	  if ( d != expect )
 	    fail("Failed to inverse convolutional coding");
-	  unsigned long d2 = parity(iq&deconv2[b]);
+	  int d2 = parity(iq&deconv2[b]);
 	  if ( d2 != expect )
 	    fail("Failed to inverse convolutional coding (alt)");
 	}
@@ -439,8 +442,8 @@ namespace leansdr {
     pipewriter<Tbyte> out;
     // DECONVOL
     int nG;
-    unsigned long *conv;  // [nG] Convolution polynomials; MSB is newest
-    unsigned long *punct;  // [nG] Puncturing pattern
+    uint32_t *conv;  // [nG] Convolution polynomials; MSB is newest
+    uint32_t *punct;  // [nG] Puncturing pattern
     int punctperiod, punctweight;
     iq_t *deconv;  // [punctperiod] Deconvolution polynomials
     iq_t *deconv2;  // [punctperiod] Alternate polynomials (for fastlock)
@@ -456,7 +459,7 @@ namespace leansdr {
 						  pipebuf<u8> &_out,
 						  enum code_rate rate) {
     // EN 300 421, section 4.4.3 Inner coding
-    unsigned long pX, pY;
+    uint32_t pX, pY;
     switch ( rate ) {
     case FEC12:
       pX = 0x1;  // 1
@@ -510,7 +513,7 @@ namespace leansdr {
   private:
     pipereader<uncoded_byte> in;
     pipewriter<hardsymbol> out;
-    convol_poly2<unsigned long, 0171, 0133> convol;
+    convol_poly2<uint32_t, 0171, 0133> convol;
   };  // dvb_convol
 
 
@@ -574,8 +577,7 @@ namespace leansdr {
     static const int NSYNCS = 4;
 
     struct sync_t {
-      deconvol_poly2<Tin, unsigned long,
-		     unsigned long long, 0x3ba, 0x38f70> deconv;
+      deconvol_poly2<Tin, uint32_t, uint64_t, 0x3ba, 0x38f70> deconv;
       u8 lut[4];  // TBD Swap and flip bits in the polynomials instead.
     } syncs[NSYNCS];
 
@@ -1079,10 +1081,10 @@ namespace leansdr {
 
   struct viterbi_sync : runnable {
     static const int TRACEBACK = 32;  // Suitable for QPSK 1/2
-    typedef unsigned char TS, TCS, TUS;
-    typedef unsigned short TBM;
-    typedef unsigned long TPM;
-    typedef bitpath<unsigned long,TUS,1,TRACEBACK> dvb_path;
+    typedef uint8_t TS, TCS, TUS;
+    typedef uint16_t TBM;
+    typedef uint32_t TPM;
+    typedef bitpath<uint32_t,TUS,1,TRACEBACK> dvb_path;
     typedef viterbi_dec<TS,64, TUS,2, TCS,4, TBM, TPM, dvb_path> dvb_dec;
     typedef trellis<TS,64, TUS,2, 4> dvb_trellis;
 
@@ -1107,7 +1109,7 @@ namespace leansdr {
 	resync_period(32)   // 1/32 = 9% synchronization overhead
     {
       dvb_trellis *trell = new dvb_trellis();
-      unsigned long long dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
+      uint64_t dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
       trell->init_convolutional(dvb_polynomials);
       for ( int s=0; s<NSYNCS; ++s ) syncs[s] = new dvb_dec(trell);
     }
@@ -1189,10 +1191,10 @@ namespace leansdr {
 
   struct viterbi_sync_bpsk : runnable {
     static const int TRACEBACK = 32;  // Suitable for BPSK 1/2
-    typedef unsigned char TS, TCS, TUS;
-    typedef unsigned short TBM;
-    typedef unsigned long TPM;
-    typedef bitpath<unsigned long,TUS,1,TRACEBACK> dvb_path;
+    typedef uint8_t TS, TCS, TUS;
+    typedef uint16_t TBM;
+    typedef uint32_t TPM;
+    typedef bitpath<uint32_t,TUS,1,TRACEBACK> dvb_path;
     typedef viterbi_dec<TS,64, TUS,2, TCS,4, TBM, TPM, dvb_path> dvb_dec;
     typedef trellis<TS,64, TUS,2, 4> dvb_trellis;
 
@@ -1217,7 +1219,7 @@ namespace leansdr {
 	resync_period(32)
     {
       dvb_trellis *trell = new dvb_trellis();
-      unsigned long long dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
+      uint64_t dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
       trell->init_convolutional(dvb_polynomials);
       for ( int s=0; s<NSYNCS; ++s ) syncs[s] = new dvb_dec(trell);
     }

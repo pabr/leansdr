@@ -34,7 +34,7 @@ namespace leansdr {
 	  states[s].branches[cs].pred = NOSTATE;
     }
 
-    void init_convolutional(unsigned long long G[]) {
+    void init_convolutional(uint64_t G[]) {
       if ( NCS & (NCS-1) )  {
 	fprintf(stderr, "NCS must be a power of 2\n");
 	exit(1);
@@ -46,8 +46,8 @@ namespace leansdr {
       for ( TS s=0; s<NSTATES; ++s ) {
 	for ( TUS us=0; us<NUS; ++us ) {
 	  // Run the convolutional encoder from state s with input us
-	  unsigned long long shiftreg = s | (us*NSTATES);
-	  unsigned long cs = 0;
+	  uint64_t shiftreg = s | (us*NSTATES);
+	  uint32_t cs = 0;
 	  for ( int g=0; g<nG; ++g )
 	    cs = (cs<<1) | parity(shiftreg&G[g]);
 	  shiftreg /= NUS;  // Shift bits for 1 uncoded symbol

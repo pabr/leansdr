@@ -179,7 +179,7 @@ namespace leansdr {
 
   // QPSK 1/2 only.
   
-  template<typename Thist, unsigned long long POLY1, unsigned long long POLY2>
+  template<typename Thist, uint64_t POLY1, uint64_t POLY2>
   struct convol_poly2 {
     typedef u8 uncoded_byte;
     typedef u8 hardsymbol;

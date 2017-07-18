@@ -1,4 +1,5 @@
 HEAD
+  * Fixed --hs mode on x86_64.
   * Added --s8, --s16, --u16.
   * Improved timing recovery at low SNR (small performance penalty).
   * Added --hdlc mode (compatible with some satellite modems).

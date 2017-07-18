@@ -2,6 +2,7 @@
 #define LEANSDR_MATH_H
 
 #include <math.h>
+#include <stdint.h>
 
 namespace leansdr {
 
@@ -35,35 +36,35 @@ namespace leansdr {
   }
   
   // TBD Optimize with dedicated instructions
-  int hamming_weight(unsigned char x) {
+  int hamming_weight(uint8_t x) {
     static const int lut[16] = { 0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4 };
     return lut[x&15] + lut[x>>4];
   }
-  int hamming_weight(unsigned short x) {
-    return hamming_weight((unsigned char)x)
-      +    hamming_weight((unsigned char)(x>>8));
+  int hamming_weight(uint16_t x) {
+    return hamming_weight((uint8_t)x)
+      +    hamming_weight((uint8_t)(x>>8));
   }
-  int hamming_weight(unsigned long x) {
-    return hamming_weight((unsigned short)x)
-      +    hamming_weight((unsigned short)(x>>16));
+  int hamming_weight(uint32_t x) {
+    return hamming_weight((uint16_t)x)
+      +    hamming_weight((uint16_t)(x>>16));
   }
-  int hamming_weight(unsigned long long x) {
-    return hamming_weight((unsigned long)x)
-      +    hamming_weight((unsigned long)(x>>32));
+  int hamming_weight(uint64_t x) {
+    return hamming_weight((uint32_t)x)
+      +    hamming_weight((uint32_t)(x>>32));
   }
 
-  unsigned char parity(unsigned char x) {
+  unsigned char parity(uint8_t x) {
     x ^= x>>4;
     return (0x6996 >> (x&15)) & 1;  // 16-entry look-up table
   }
-  unsigned char parity(unsigned short x) {
-    return parity((unsigned char)(x^(x>>8)));
+  unsigned char parity(uint16_t x) {
+    return parity((uint8_t)(x^(x>>8)));
   }
-  unsigned char parity(unsigned long x) {
-    return parity((unsigned short)(x^(x>>16)));
+  unsigned char parity(uint32_t x) {
+    return parity((uint16_t)(x^(x>>16)));
   }
-  unsigned char parity(unsigned long long x) {
-    return parity((unsigned long)(x^(x>>32)));
+  unsigned char parity(uint64_t x) {
+    return parity((uint32_t)(x^(x>>32)));
   }
 
   
@@ -78,12 +79,12 @@ namespace leansdr {
 	lut[a].im = sinf(af);
       }
     }
-    inline const complex<float> &expi(unsigned short a) const {
+    inline const complex<float> &expi(uint16_t a) const {
       return lut[a];
     }
-    // a must fit in a signed long, otherwise behaviour is undefined
+    // a must fit in a int32_t, otherwise behaviour is undefined
     inline const complex<float> &expi(float a) const {
-      return expi((unsigned short)(signed short)(signed long)a);
+      return expi((uint16_t)(int16_t)(int32_t)a);
     }
   };
 
