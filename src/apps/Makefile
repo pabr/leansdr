@@ -8,16 +8,15 @@ clean:
 
 DEPS	= ../leansdr/*.h
 
-CXXFLAGS = -O3 -I.. -Wall -Wno-sign-compare -Wno-array-bounds -Wno-unused-variable -Wno-tautological-compare
-CXXFLAGS += -L/opt/X11/lib -lX11 -lpthread
+CXXFLAGS	= -O3 -I.. -Wall -Wno-sign-compare -Wno-array-bounds -Wno-unused-variable
 
 %:	%.cc $(DEPS)
 	g++ $(CXXFLAGS) -DGUI $< -lX11 -o $@  ||  \
-	g++ $(CXXFLAGS)       $<      -o $@
+	g++ $(CXXFLAGS)       $<       -o $@
 
 EMBED_FLAGS=	-I.. -Wall -Wno-sign-compare -Wno-array-bounds -Wno-unused-variable  \
-		-Ofast -lm -mfpu=neon -funsafe-math-optimizations -fsingle-precision-constant -lm
+		-Ofast -mfpu=neon -funsafe-math-optimizations -fsingle-precision-constant
 
 leandvb.embedded:	leandvb.cc $(DEPS)
-	clang $(CXXFLAGS) $(EMBED_FLAGS) $< -static -o $@  ||  \
-	clang $(CXXFLAGS) $(EMBED_FLAGS) $<         -o $@
+	g++ $(CXXFLAGS) $(EMBED_FLAGS) $< -static -o $@  ||  \
+	g++ $(CXXFLAGS) $(EMBED_FLAGS) $<         -o $@

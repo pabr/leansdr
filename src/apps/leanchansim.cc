@@ -21,11 +21,7 @@ struct drifter : runnable {
       t(0) {
     memset(drifts, 0, sizeof(drifts));
     for ( int i=0; i<65536; ++i )
-#ifdef __APPLE__
-      __sincosf(2*M_PI*i/65536, &lut_trig[i].im, &lut_trig[i].re);
-#else
       sincosf(2*M_PI*i/65536, &lut_trig[i].im, &lut_trig[i].re);
-#endif
   }
   
   static const int NCOMPONENTS = 3;
