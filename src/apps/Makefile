@@ -1,5 +1,6 @@
 APPS	= leandvb leansdrscan
 APPS	+= leansdrcat leantsgen leanchansim leandvbtx
+APPS	+= leandvb.embedded 
 
 all:	$(APPS)
 
@@ -9,6 +10,7 @@ clean:
 DEPS	= ../leansdr/*.h
 
 CXXFLAGS	= -O3 -I.. -Wall -Wno-sign-compare -Wno-array-bounds -Wno-unused-variable
+CXXFLAGS	+= -L/opt/X11/lib -lX11 -lpthread
 
 %:	%.cc $(DEPS)
 	g++ $(CXXFLAGS) -DGUI $< -lX11 -o $@  ||  \
