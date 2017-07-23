@@ -20,8 +20,11 @@ struct drifter : runnable {
       in(_in), out(_out),
       t(0) {
     memset(drifts, 0, sizeof(drifts));
-    for ( int i=0; i<65536; ++i )
-      sincosf(2*M_PI*i/65536, &lut_trig[i].im, &lut_trig[i].re);
+    for ( int i=0; i<65536; ++i ) {
+      float a = 2*M_PI * i / 65536;
+      lut_trig[i].re = cosf(a);
+      lut_trig[i].im = sinf(a);
+    }
   }
   
   static const int NCOMPONENTS = 3;
