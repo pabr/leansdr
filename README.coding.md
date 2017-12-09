@@ -27,3 +27,9 @@ No attempt is made to follow popular object-oriented practices.
 # Known limitations
 
 * The code is not intended to be thread-safe.
+
+* Ideally, signal processing software should always yield the same
+  output when presented with the same input.
+  leandvb should be deterministic on fast input streams (files).
+  However, on real-time streams, scheduling randomness can affect
+  internal feedback loops and cause small variations in the output.
