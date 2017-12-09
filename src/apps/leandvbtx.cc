@@ -91,7 +91,7 @@ void run(config &cfg) {
   // CONVOLUTIONAL CODER
 
   cstln_lut<256> *cstln = make_dvbs2_constellation(cfg.constellation, cfg.fec);
-  int bits_per_symbol = log2(cstln->nsymbols);
+  int bits_per_symbol = log2i(cstln->nsymbols);
 
   if ( cfg.fec==FEC23 && (cstln->nsymbols==4 ||
 			  cstln->nsymbols==64) ) {

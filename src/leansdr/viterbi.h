@@ -47,7 +47,7 @@ namespace leansdr {
 	exit(1);
       }
       // Derive number of polynomials from NCS.
-      int nG = log2(NCS);
+      int nG = log2i(NCS);
 
       for ( TS s=0; s<NSTATES; ++s ) {
 	for ( TUS us=0; us<NUS; ++us ) {

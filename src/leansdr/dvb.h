@@ -1212,7 +1212,7 @@ namespace leansdr {
 	resync_phase(0),
 	resync_period(32)   // 1/32 = 9% synchronization overhead TBD
     {
-      bits_per_symbol = log2(cstln->nsymbols);
+      bits_per_symbol = log2i(cstln->nsymbols);
       fec = &fec_specs[cr];
       { // Sanity check: FEC block size must be a multiple of label size.
 	int symbols_per_block = fec->bits_out / bits_per_symbol;
