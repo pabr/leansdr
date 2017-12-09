@@ -203,6 +203,55 @@ namespace leansdr {
     Thist hist;
   };  // convol_poly2
 
+  // Generic BPSK..256QAM and puncturing
+
+  template<typename Thist, int HISTSIZE>
+  struct convol_multipoly {
+    typedef u8 uncoded_byte;
+    typedef u8 hardsymbol;
+    int bits_in, bits_out, bps;
+    const Thist *polys;    // [bits_out]
+
+    convol_multipoly()
+      : bits_in(0), bits_out(0), bps(0),
+	hist(0), nhist(0), sersymb(0), nsersymb(0)
+    { }
+
+    void encode(const uncoded_byte *pin, hardsymbol *pout, int count) {
+      if ( !bits_in || !bits_out || !bps )
+	fatal("convol_multipoly not configured");
+      hardsymbol symbmask = (1<<bps) - 1;
+      for ( ; count--; ++pin ) {
+	uncoded_byte b = *pin;
+	for ( int bit=8; bit--; ) {
+	  hist = (hist>>1) | ((Thist)((b>>bit)&1)<<(HISTSIZE-1));
+	  ++nhist;
+	  if ( nhist == bits_in ) {
+	    for ( int p=0; p<bits_out; ++p ) {
+	      int b = parity((Thist)(hist & polys[p]));
+	      sersymb = (sersymb<<1) | b;
+	    }
+	    nhist = 0;
+	    nsersymb += bits_out;
+	    while ( nsersymb >= bps ) {
+	      hardsymbol s = (sersymb >> (nsersymb-bps)) & symbmask;
+	      *pout++ = s;
+	      nsersymb -= bps;
+	    }
+	  }
+	}
+      }
+      // Ensure deterministic output size
+      // TBD We can relax this
+      if ( nhist || nsersymb ) fatal("partial run");
+    }
+  private:
+    Thist hist;
+    int nhist;
+    Thist sersymb;
+    int nsersymb;
+  };  // convol_multipoly
+
 }  // namespace
 
 #endif  // LEANSDR_CONVOLUTIONAL_H

@@ -67,6 +67,11 @@ namespace leansdr {
     return parity((uint32_t)(x^(x>>32)));
   }
 
+  int log2(uint64_t x) {
+    int n = -1;
+    for ( ; x; ++n,x>>=1 ) ;
+    return n;
+  }
   
   // Pre-computed sin/cos for 16-bit angles
 

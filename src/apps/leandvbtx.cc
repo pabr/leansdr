@@ -41,6 +41,8 @@ private:
 };
 
 struct config {
+  cstln_lut<256>::predef constellation;
+  code_rate fec;
   float power;
   bool agc;
   int interp;
@@ -48,7 +50,8 @@ struct config {
   float rolloff;
   bool verbose, debug;
   config()
-    : power(1.0), agc(false),
+    : constellation(cstln_lut<256>::QPSK),
+      power(1.0), agc(false),
       interp(2), decim(1), rolloff(0.35),
     verbose(false), debug(false)
   { }
@@ -59,9 +62,10 @@ void run(config &cfg) {
   sch.verbose = cfg.verbose;
   sch.debug = cfg.debug;
 
-  unsigned long BUF_PACKETS = 12;  // TBD Reduce copying
-  unsigned long BUF_BYTES = SIZE_RSPACKET*12;
-  unsigned long BUF_SYMBOLS = BUF_BYTES*8;
+  int buf_factor = 2;
+  unsigned long BUF_PACKETS = 12*buf_factor;  // TBD Reduce copying
+  unsigned long BUF_BYTES = SIZE_RSPACKET*BUF_PACKETS;
+  unsigned long BUF_SYMBOLS = BUF_BYTES*8 * 2;  // Worst case BPSK 1/2
   unsigned long BUF_BASEBAND = 4096;
 
   // TS PACKETS ON STDIN
@@ -86,15 +90,22 @@ void run(config &cfg) {
 
   // CONVOLUTIONAL CODER
 
+  cstln_lut<256> *cstln = make_dvbs2_constellation(cfg.constellation, cfg.fec);
+  int bits_per_symbol = log2(cstln->nsymbols);
+
+  if ( cfg.fec==FEC23 && (cstln->nsymbols==4 ||
+			  cstln->nsymbols==64) ) {
+    if ( cfg.verbose ) fprintf(stderr, "Handling rate 2/3 as 4/6\n");
+    cfg.fec = FEC46;
+  }
   pipebuf<u8> p_symbols(&sch, "symbols", BUF_SYMBOLS);
-  dvb_convol r_convol(&sch, p_mpegbytes, p_symbols);
+  dvb_convol r_convol(&sch, p_mpegbytes, p_symbols, cfg.fec, bits_per_symbol);
 
   // IQ MAPPER
 
   pipebuf<cf32> p_iqsymbols(&sch, "IQ symbols", BUF_SYMBOLS);
   cstln_transmitter<f32,0> r_mod(&sch, p_symbols, p_iqsymbols);
-  cstln_lut<256> qpsk(cstln_lut<256>::QPSK);
-  r_mod.cstln = &qpsk;
+  r_mod.cstln = cstln;
 
   // RESAMPLER
 
@@ -152,6 +163,11 @@ void usage(const char *name, FILE *f, int c) {
   fprintf(f, "Output float complex samples\n");
   fprintf
     (f, "\nOptions:"
+     "  --const STRING           QPSK (default),\n"
+     "                           BPSK .. 32APSK (DVB-S2),\n"
+     "                           64APSKe (DVB-S2X),\n"
+     "                           16QAM .. 256QAM (experimental)\n"
+     "  --cr STRING              1/2, 2/3, 3/4, 5/6, 7/8\n"
      "  -f INTERP[/DECIM]        Samples per symbols (default: 2)\n"
      "  --roll-off R             RRC roll-off (defalt: 0.35)\n"
      "  --power P                Output power (dB)\n"
@@ -171,6 +187,42 @@ int main(int argc, char *argv[]) {
       cfg.verbose = true;
     else if ( ! strcmp(argv[i], "-d") )
       cfg.debug = true;
+    else if ( ! strcmp(argv[i], "--cr") && i+1<argc ) {
+      ++i;
+      // DVB-S
+      if      ( ! strcmp(argv[i], "1/2" ) ) cfg.fec = FEC12;
+      else if ( ! strcmp(argv[i], "2/3" ) ) cfg.fec = FEC23;
+      else if ( ! strcmp(argv[i], "3/4" ) ) cfg.fec = FEC34;
+      else if ( ! strcmp(argv[i], "5/6" ) ) cfg.fec = FEC56;
+      else if ( ! strcmp(argv[i], "7/8" ) ) cfg.fec = FEC78;
+      // DVB-S2
+      else if ( ! strcmp(argv[i], "4/5"  ) ) cfg.fec = FEC45;
+      else if ( ! strcmp(argv[i], "8/9"  ) ) cfg.fec = FEC89;
+      else if ( ! strcmp(argv[i], "9/10" ) ) cfg.fec = FEC910;
+      else usage(argv[0], stderr, 1);
+    }
+    else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
+      ++i;
+      if      ( ! strcmp(argv[i], "BPSK" ) )
+	cfg.constellation = cstln_lut<256>::BPSK;
+      else if ( ! strcmp(argv[i], "QPSK" ) )
+	cfg.constellation = cstln_lut<256>::QPSK;
+      else if ( ! strcmp(argv[i], "8PSK" ) )
+	cfg.constellation = cstln_lut<256>::PSK8;
+      else if ( ! strcmp(argv[i], "16APSK" ) )
+	cfg.constellation = cstln_lut<256>::APSK16;
+      else if ( ! strcmp(argv[i], "32APSK" ) )
+	cfg.constellation = cstln_lut<256>::APSK32;
+      else if ( ! strcmp(argv[i], "64APSKe" ) )
+	cfg.constellation = cstln_lut<256>::APSK64E;
+      else if ( ! strcmp(argv[i], "16QAM" ) )
+	cfg.constellation = cstln_lut<256>::QAM16;
+      else if ( ! strcmp(argv[i], "64QAM" ) )
+	cfg.constellation = cstln_lut<256>::QAM64;
+      else if ( ! strcmp(argv[i], "256QAM" ) )
+	cfg.constellation = cstln_lut<256>::QAM256;
+      else usage(argv[0], stderr, 1);
+    }
     else if ( ! strcmp(argv[i], "-f") && i+1<argc ) {
       ++i;
       cfg.decim = 1;

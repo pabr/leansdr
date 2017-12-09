@@ -18,20 +18,22 @@ namespace leansdr {
   // Generic deconvolution
 
   enum code_rate {
-    FEC12, FEC23, FEC34, FEC56, FEC78,  // DVB-S
-    FEC45, FEC89, FEC910,               // DVB-S2
+    FEC12, FEC23, FEC46, FEC34, FEC56, FEC78,  // DVB-S
+    FEC45, FEC89, FEC910,                      // DVB-S2
+    FEC_MAX
   };
 
   // Customize APSK radii according to code rate
 
-  cstln_lut<256> *make_dvbs2_constellation(cstln_lut<256>::predef c,
-					   code_rate r) {
-    float gamma1=1, gamma2=1;
+  cstln_lut<256> * make_dvbs2_constellation(cstln_lut<256>::predef c,
+					    code_rate r) {
+    float gamma1=1, gamma2=1, gamma3=1;
     switch ( c ) {
     case cstln_lut<256>::APSK16:
       // EN 302 307, section 5.4.3, Table 9
       switch ( r ) {
-      case FEC23:  gamma1 = 3.15; break;
+      case FEC23:
+      case FEC46:  gamma1 = 3.15; break;
       case FEC34:  gamma1 = 2.85; break;
       case FEC45:  gamma1 = 2.75; break;
       case FEC56:  gamma1 = 2.70; break;
@@ -51,10 +53,14 @@ namespace leansdr {
       default: fail("Code rate not supported with APSK32");
       }
       break;
+    case cstln_lut<256>::APSK64E:
+      // EN 302 307-2, section 5.4.5, Table 13f
+      gamma1 = 2.4; gamma2 = 4.3; gamma3 = 7;
+      break;
     default:
       break;
     }
-    return new cstln_lut<256>(c, gamma1, gamma2);
+    return new cstln_lut<256>(c, gamma1, gamma2, gamma3);
   }
 
   // EN 300 421, section 4.4.3, table 2 Punctured code, G1=0171, G2=0133
@@ -160,7 +166,7 @@ namespace leansdr {
     }
     
     void next_sync() {
-      if ( fastlock ) fatal("Bug: next_sync() called with fastlock");
+      if ( fastlock ) fail("Bug: next_sync() called with fastlock");
       ++locked;
       if ( locked == &syncs[NSYNCS] ) {
 	locked = &syncs[0];
@@ -466,6 +472,7 @@ namespace leansdr {
       pY = 0x1;  // 1
       break;
     case FEC23:
+    case FEC46:
       pX = 0xa;  // 1010  (Handle as FEC4/6, no half-symbols)
       pY = 0xf;  // 1111
       break;
@@ -493,27 +500,84 @@ namespace leansdr {
 
   // CONVOLUTIONAL ENCODER
 
+  static const uint16_t polys_fec12[] = {
+    DVBS_G1, DVBS_G2  // X1Y1
+  };
+  static const uint16_t polys_fec23[] = {
+    DVBS_G1, DVBS_G2, DVBS_G2<<1  // X1Y1Y2
+  };
+  // Same code rate as 2/3, usable with QPSK
+  static const uint16_t polys_fec46[] = {
+    DVBS_G1,    DVBS_G2,    DVBS_G2<<1,  // X1Y1Y2
+    DVBS_G1<<2, DVBS_G2<<2, DVBS_G2<<3   // X3Y3Y4
+  };
+  static const uint16_t polys_fec34[] = {
+    DVBS_G1,    DVBS_G2,    // X1Y1
+    DVBS_G2<<1, DVBS_G1<<2  // Y2X3
+  };
+  static const uint16_t polys_fec56[] = {
+    DVBS_G1,    DVBS_G2,    // X1Y1
+    DVBS_G2<<1, DVBS_G1<<2, // Y2X3
+    DVBS_G2<<3, DVBS_G1<<4  // Y4X5
+  };
+  static const uint16_t polys_fec78[] = {
+    DVBS_G1,    DVBS_G2,     // X1Y1
+    DVBS_G2<<1, DVBS_G2<<2,  // Y2Y3
+    DVBS_G2<<3, DVBS_G1<<4,  // Y4X5
+    DVBS_G2<<5, DVBS_G1<<6   // Y6X7
+  };
+
+  // FEC parameters, for convolutional coding only (not S2).
+  static struct fec_spec {
+    int bits_in;   // Entering the convolutional coder
+    int bits_out;  // Exiting the convolutional coder
+    const uint16_t *polys;  // [bits_out]
+  } fec_specs[FEC_MAX] = {
+    [FEC12] = { 1, 2, polys_fec12 },
+    [FEC23] = { 2, 3, polys_fec23 },
+    [FEC46] = { 4, 6, polys_fec46 },
+    [FEC34] = { 3, 4, polys_fec34 },
+    [FEC56] = { 5, 6, polys_fec56 },
+    [FEC78] = { 7, 8, polys_fec78 },
+  };
+
   struct dvb_convol : runnable {
     typedef u8 uncoded_byte;
     typedef u8 hardsymbol;
     dvb_convol(scheduler *sch,
 	       pipebuf<uncoded_byte> &_in,
-	       pipebuf<hardsymbol> &_out)
+	       pipebuf<hardsymbol> &_out,
+	       code_rate fec,
+	       int bits_per_symbol)
       : runnable(sch, "dvb_convol"),
-	in(_in), out(_out,8)
+	in(_in), out(_out,64)  // BPSK 7/8: 7 bytes in, 64 symbols out
     {
+      fec_spec *fs = &fec_specs[fec];
+      if ( ! fs->bits_in ) fail("Unexpected FEC");
+      convol.bits_in = fs->bits_in;
+      convol.bits_out = fs->bits_out;
+      convol.polys = fs->polys;
+      convol.bps = bits_per_symbol;
+      // FEC must output a whole number of IQ symbols
+      if ( convol.bits_out % convol.bps )
+	fail("Code rate not suitable for this constellation");
     }
+
     void run() {
-      int count = min(in.readable(), out.writable()/8);
-      static const u8 remap[] = { 0, 1, 2, 3 };
-      convol.run(in.rd(), remap, out.wr(), count);
+      int count = min(in.readable(), out.writable()*convol.bps/
+		      convol.bits_out*convol.bits_in/8);
+      // Process in multiples of the puncturing period and of 8 bits.
+      int chunk = convol.bits_in;
+      count = (count/chunk) * chunk;
+      convol.encode(in.rd(), out.wr(), count);
       in.read(count);
-      out.written(count*8);
+      int nout = count*8/convol.bits_in*convol.bits_out/convol.bps;
+      out.written(nout);
     }
   private:
     pipereader<uncoded_byte> in;
     pipewriter<hardsymbol> out;
-    convol_poly2<uint32_t, 0171, 0133> convol;
+    convol_multipoly<uint16_t, 16> convol;
   };  // dvb_convol
 
 
@@ -1077,22 +1141,61 @@ namespace leansdr {
 
 
   // VITERBI DECODING
-  // QPSK 1/2 only.
+  // Supports all code rates and constellations
+  // Simplified metric to support large constellations.
+
+  // This version implements puncturing by expanding the trellis.
+  // TBD Compare performance vs skipping updates in a 1/2 trellis.
 
   struct viterbi_sync : runnable {
-    static const int TRACEBACK = 32;  // Suitable for QPSK 1/2
     typedef uint8_t TS, TCS, TUS;
-    typedef uint16_t TBM;
-    typedef uint32_t TPM;
-    typedef bitpath<uint32_t,TUS,1,TRACEBACK> dvb_path;
-    typedef viterbi_dec<TS,64, TUS,2, TCS,4, TBM, TPM, dvb_path> dvb_dec;
-    typedef trellis<TS,64, TUS,2, 4> dvb_trellis;
+    typedef int32_t TBM;  // Only 16 bits per IQ, but several IQ per Viterbi CS
+    typedef int32_t TPM;
+    typedef viterbi_dec_interface<TUS,TCS,TBM,TPM> dvb_dec_interface;
+
+    // 1/2: 6 bits of state, 1 bit in, 2 bits out
+    typedef bitpath<uint32_t,TUS,1,32> path_12;
+    typedef trellis<TS,64, TUS,2, 4> trellis_12;
+    typedef viterbi_dec<TS,64, TUS,2, TCS,4, TBM, TPM, path_12> dvb_dec_12;
+
+    // 2/3: 6 bits of state, 2 bits in, 3 bits out
+    typedef bitpath<uint64_t,TUS,3,21> path_23;
+    typedef trellis<TS,64, TUS,4, 8> trellis_23;
+    typedef viterbi_dec<TS,64, TUS,4, TCS,8, TBM, TPM, path_23> dvb_dec_23;
+
+    // 4/6: 6 bits of state, 4 bits in, 6 bits out
+    typedef bitpath<uint64_t,TUS,4,16> path_46;
+    typedef trellis<TS,64, TUS,16, 64> trellis_46;
+    typedef viterbi_dec<TS,64, TUS,16, TCS,64, TBM, TPM, path_46> dvb_dec_46;
+
+    // 3/4: 6 bits of state, 3 bits in, 4 bits out
+    typedef bitpath<uint64_t,TUS,3,21> path_34;
+    typedef trellis<TS,64, TUS,8, 16> trellis_34;
+    typedef viterbi_dec<TS,64, TUS,8, TCS,16, TBM, TPM, path_34> dvb_dec_34;
+
+    // 5/6: 6 bits of state, 5 bits in, 6 bits out
+    typedef bitpath<uint64_t,TUS,5,12> path_56;
+    typedef trellis<TS,64, TUS,32, 64> trellis_56;
+    typedef viterbi_dec<TS,64, TUS,32, TCS,64, TBM, TPM, path_56> dvb_dec_56;
+
+    // QPSK 7/8: 6 bits of state, 7 bits in, 8 bits out
+    typedef bitpath<uint64_t,TUS,7,9> path_78;
+    typedef trellis<TS,64, TUS,128, 256> trellis_78;
+    typedef viterbi_dec<TS,64, TUS,128, TCS,256, TBM, TPM, path_78> dvb_dec_78;
 
   private:
     pipereader<softsymbol> in;
     pipewriter<unsigned char> out;
-    static const int NSYNCS = 4;
-    dvb_dec *syncs[NSYNCS];
+    cstln_lut<256> *cstln;
+    fec_spec *fec;
+    int bits_per_symbol;     // Bits per IQ symbol (not per coded symbol)
+    int nsyncs;
+    int nshifts;
+    struct sync {
+      int shift;
+      dvb_dec_interface *dec;
+      TCS *map;  // [nsymbols]
+    } *syncs;  // [nsyncs]
     int current_sync;
     static const int chunk_size = 128;
     int resync_phase;
@@ -1100,78 +1203,173 @@ namespace leansdr {
     int resync_period;
 
     viterbi_sync(scheduler *sch,
-		 pipebuf<softsymbol> &_in,
-		 pipebuf<unsigned char> &_out)
+		 pipebuf<softsymbol> &_in, pipebuf<unsigned char> &_out,
+		 cstln_lut<256> *_cstln, code_rate cr)
       : runnable(sch, "viterbi_sync"),
 	in(_in), out(_out, chunk_size),
+	cstln(_cstln),
 	current_sync(0),
 	resync_phase(0),
-	resync_period(32)   // 1/32 = 9% synchronization overhead
+	resync_period(32)   // 1/32 = 9% synchronization overhead TBD
     {
-      dvb_trellis *trell = new dvb_trellis();
-      uint64_t dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
-      trell->init_convolutional(dvb_polynomials);
-      for ( int s=0; s<NSYNCS; ++s ) syncs[s] = new dvb_dec(trell);
+      bits_per_symbol = log2(cstln->nsymbols);
+      fec = &fec_specs[cr];
+      { // Sanity check: FEC block size must be a multiple of label size.
+	int symbols_per_block = fec->bits_out / bits_per_symbol;
+	if ( bits_per_symbol*symbols_per_block != fec->bits_out )
+	  fail("Code rate not suitable for this constellation");
+      }
+      int nconj;
+      switch ( cstln->nsymbols ) {
+      case 2: nconj = 1; break;  // Conjugation is not relevant for BPSK
+      default: nconj = 2; break;
+      }
+
+      int nrotations;
+      switch ( cstln->nsymbols ) {
+      case 2:
+      case 4:
+	// For BPSK and QPSK, 180° rotation is handled as
+	// polarity inversion in mpeg_sync.
+	nrotations = cstln->nrotations/2;
+	break;
+      default:
+	nrotations = cstln->nrotations;
+	break;
+      }
+      nshifts = fec->bits_out / bits_per_symbol;
+      nsyncs = nconj * nrotations * nshifts;
+
+      // TBD Many HOM constellations are labelled in such a way
+      // that certain rot/conj combinations are equivalent to
+      // polarity inversion.  We could reduce nsyncs.
+
+      syncs = new sync[nsyncs];
+
+      for ( int s=0; s<nsyncs; ++s ) {
+	// Bit pattern  [shift|conj|rot]
+	int rot = s % nrotations;
+	int conj = (s/nrotations) % nconj;
+	int shift = s / nrotations / nconj;
+	syncs[s].shift = shift;
+	if ( shift ) // Reuse identical map
+	  syncs[s].map = syncs[conj*nrotations+rot].map;
+	else
+	  syncs[s].map = init_map(conj, 2*M_PI*rot/cstln->nrotations);
+#if 0
+	fprintf(stderr, "sync %3d: conj%d offs%d rot%d/%d map:",
+		s, conj, syncs[s].shift, rot, cstln->nrotations);
+        for ( int i=0; i<cstln->nsymbols; ++i )
+	  fprintf(stderr, " %2d", syncs[s].map[i]);
+        fprintf(stderr, "\n");
+#endif
+      }
+
+      if ( cr == FEC12 ) {
+	trellis_12 *trell = new trellis_12();
+	trell->init_convolutional(fec->polys);
+	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_12(trell);
+      }
+      else if ( cr == FEC23 ) {
+	trellis_23 *trell = new trellis_23();
+	trell->init_convolutional(fec->polys);
+	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_23(trell);
+      }
+      else if ( cr == FEC46 ) {
+	trellis_46 *trell = new trellis_46();
+	trell->init_convolutional(fec->polys);
+	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_46(trell);
+      }
+      else if ( cr == FEC34 ) {
+	trellis_34 *trell = new trellis_34();
+	trell->init_convolutional(fec->polys);
+	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_34(trell);
+      }
+      else if ( cr == FEC56 ) {
+	trellis_56 *trell = new trellis_56();
+	trell->init_convolutional(fec->polys);
+	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_56(trell);
+      }
+      else if ( cr == FEC78 ) {
+	trellis_78 *trell = new trellis_78();
+	trell->init_convolutional(fec->polys);
+	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_78(trell);
+      }
+      else
+	fail("CR not supported");
+
     }
 
-    inline TUS update_sync(int s, TBM m[4], TPM *discr) {
-      // EN 300 421, section 4.5 Baseband shaping and modulation
-      // EN 302 307, section 5.4.1
-      //              
-      //    IQ=10=(2) | IQ=00=(0)
-      //    ----------+----------
-      //    IQ=11=(3) | IQ=01=(1)
-      //
-      TBM vm[4];
-      switch ( s ) {
-      case 0:  // Mapping for 0°
-	vm[0]=m[0]; vm[1]=m[1]; vm[2]=m[2]; vm[3]=m[3]; break;
-      case 1:  // Mapping for 90°
-	vm[0]=m[2]; vm[2]=m[3]; vm[3]=m[1]; vm[1]=m[0]; break;
-      case 2:  // Mapping for 0° conjugated
-	vm[0]=m[1]; vm[1]=m[0]; vm[2]=m[3]; vm[3]=m[2]; break;
-      case 3:  // Mapping for 90° conjugated
-	vm[0]=m[3]; vm[2]=m[2]; vm[3]=m[0]; vm[1]=m[1]; break;
-      default:
-	return 0;  // Avoid compiler warning
+    TCS *init_map(bool conj, float angle) {
+      // Each constellation has its own pattern for labels.
+      // Here we simply tabulate systematically.
+      TCS *map = new TCS[cstln->nsymbols];
+      float ca=cosf(angle), sa=sinf(angle);
+      for ( int i=0; i<cstln->nsymbols; ++i ) {
+	int8_t I = cstln->symbols[i].re;
+	int8_t Q = cstln->symbols[i].im;
+	if ( conj ) Q = -Q;
+	int8_t RI = I*ca - Q*sa;
+	int8_t RQ = I*sa + Q*ca;
+	cstln_lut<256>::result *pr = cstln->lookup(RI, RQ);
+	map[i] = pr->ss.symbol;
       }
-      return syncs[s]->update(vm, discr);
+      return map;
+    }
+
+    inline TUS update_sync(int s, softsymbol *pin, TPM *discr) {
+      // Read one FEC ouput block
+      pin += syncs[s].shift;
+      TCS cs = 0;
+      TBM cost = 0;
+      for ( int i=0; i<nshifts; ++i,++pin )  {
+	cs = (cs<<bits_per_symbol) | syncs[s].map[pin->symbol];
+	cost += pin->cost;
+      }
+      return syncs[s].dec->update(cs, cost, discr);
     }
 
     void run() {
-      while ( in.readable()>=8*chunk_size && out.writable()>=chunk_size ) {
-	unsigned long totaldiscr[NSYNCS];
-	for ( int s=0; s<NSYNCS; ++s ) totaldiscr[s] = 0;
-	for ( int bytenum=0; bytenum<chunk_size; ++bytenum ) {
-	  // Decode one byte
-	  unsigned char byte = 0;
-	  softsymbol *pin = in.rd();
+      // Number of FEC blocks to fill the bitpath depth.
+      // Before that we cannot discriminate between synchronizers
+      int discr_delay = 64 / fec->bits_in;
+
+      // Process [chunk_size] FEC blocks at a time
+
+      while ( in.readable() >= nshifts*chunk_size + (nshifts-1) &&
+	      out.writable()*8 >= fec->bits_in*chunk_size ) {
+	TPM totaldiscr[nsyncs];
+	for ( int s=0; s<nsyncs; ++s ) totaldiscr[s] = 0;
+
+	uint64_t outstream = 0;
+	int nout = 0;
+	softsymbol *pin = in.rd();
+	for ( int blocknum=0; blocknum<chunk_size; ++blocknum,pin+=nshifts ) {
+	  TPM discr;
+	  TUS result = update_sync(current_sync, pin, &discr);
+	  outstream = (outstream<<fec->bits_in) | result;
+	  nout += fec->bits_in;
+	  if ( blocknum >= discr_delay ) totaldiscr[current_sync] += discr;
 	  if ( ! resync_phase ) {
-	    // Every one in [resync_period] chunks, run all decoders
-	    // and compute average quality metrics
-	    for ( int b=0; b<8; ++b,++pin ) {
-	      TUS bits[NSYNCS];
-	      for ( int s=0; s<NSYNCS; ++s ) {
-		TPM discr;
-		bits[s] = update_sync(s, pin->metrics4, &discr);
-		if ( bytenum*8 > TRACEBACK ) totaldiscr[s] += discr;
-	      }
-	      byte = (byte<<1) | bits[current_sync];
-	    }
-	  } else {
-	    // Otherwise run only the selected decoder
-	    for ( int b=0; b<8; ++b,++pin ) {
-	      TUS bit = update_sync(current_sync, pin->metrics4, NULL);
-	      byte = (byte<<1) | bit;
+	    // Every [resync_period] chunks, also run the other decoders.
+	    for ( int s=0; s<nsyncs; ++s ) {
+	      if ( s == current_sync ) continue;
+	      TPM discr;
+	      (void)update_sync(s, pin, &discr);
+	      if ( blocknum >= discr_delay ) totaldiscr[s] += discr;
 	    }
 	  }
-	  in.read(8);
-	  out.write(byte);
+	  while ( nout >= 8 ) {
+	    out.write(outstream>>(nout-8));
+	    nout -= 8;
+	  }
 	}  // chunk_size
+	in.read(chunk_size*nshifts);
+	if ( nout ) fail("overlapping out");
 	if ( ! resync_phase ) {
 	  // Switch to another decoder ?
 	  int best = current_sync;
-	  for ( int s=0; s<NSYNCS; ++s )
+	  for ( int s=0; s<nsyncs; ++s )
 	    if ( totaldiscr[s] > totaldiscr[best] ) best = s;
 	  if ( best != current_sync ) {
 	    if ( sch->debug ) fprintf(stderr, "{%d->%d}", current_sync, best);
@@ -1181,116 +1379,10 @@ namespace leansdr {
 	if ( ++resync_phase >= resync_period ) resync_phase = 0;
       }
     }
-    
+
   };  // viterbi_sync
 
 
-  // VITERBI DECODING - BPSK
-  // ETSI TR 101 198: The BPSK variant of DVB-S transmits R=I,Q,I,Q,...
-  // Code rate 1/2 only.
-
-  struct viterbi_sync_bpsk : runnable {
-    static const int TRACEBACK = 32;  // Suitable for BPSK 1/2
-    typedef uint8_t TS, TCS, TUS;
-    typedef uint16_t TBM;
-    typedef uint32_t TPM;
-    typedef bitpath<uint32_t,TUS,1,TRACEBACK> dvb_path;
-    typedef viterbi_dec<TS,64, TUS,2, TCS,4, TBM, TPM, dvb_path> dvb_dec;
-    typedef trellis<TS,64, TUS,2, 4> dvb_trellis;
-
-  private:
-    pipereader<softsymbol> in;
-    pipewriter<unsigned char> out;
-    static const int NSYNCS = 2;  // Alignment of symbol pairs
-    dvb_dec *syncs[2];
-    int current_sync;
-    static const int chunk_size = 128;
-    int resync_phase;
-  public:
-    int resync_period;
-
-    viterbi_sync_bpsk(scheduler *sch,
-		      pipebuf<softsymbol> &_in,
-		      pipebuf<unsigned char> &_out)
-      : runnable(sch, "viterbi_sync_bpsk"),
-	in(_in), out(_out, chunk_size),
-	current_sync(0),
-	resync_phase(0),
-	resync_period(32)
-    {
-      dvb_trellis *trell = new dvb_trellis();
-      uint64_t dvb_polynomials[] = { DVBS_G1, DVBS_G2 };
-      trell->init_convolutional(dvb_polynomials);
-      for ( int s=0; s<NSYNCS; ++s ) syncs[s] = new dvb_dec(trell);
-    }
-
-    inline TUS update_sync(int s, TBM mX[4], TBM mY[4], TPM *discr) {
-      // Reconstruct QPSK metrics from pairs of BPSK symbols.
-      // EN 300 421, section 4.5 Baseband shaping and modulation
-      // EN 302 307, section 5.4.1
-      //              
-      //    IQ=10=(2) | IQ=00=(0)
-      //    ----------+----------
-      //    IQ=11=(3) | IQ=01=(1)
-      //
-      TBM vm[4];
-      vm[0] = mX[0] + mY[0];
-      vm[1] = mX[0] + mY[1];
-      vm[2] = mX[1] + mY[0];
-      vm[3] = mX[1] + mY[1];
-      return syncs[s]->update(vm, discr);
-    }
-
-    void run() {
-      while ( in.readable()>=2*8*chunk_size+1 &&  // +1 for pair alignment
-	      out.writable()>=chunk_size ) {
-	unsigned long totaldiscr[NSYNCS];
-	for ( int s=0; s<NSYNCS; ++s ) totaldiscr[s] = 0;
-	for ( int bytenum=0; bytenum<chunk_size; ++bytenum ) {
-	  // Decode one byte
-	  unsigned char byte = 0;
-	  softsymbol *pin = in.rd();
-	  if ( ! resync_phase ) {
-	    // Every one in [resync_period] chunks, run all decoders
-	    // and compute average quality metrics
-	    for ( int b=0; b<8; ++b,pin+=2 ) {
-	      TUS bits[NSYNCS];
-	      for ( int s=0; s<NSYNCS; ++s ) {
-		TPM discr;
-		bits[s] = update_sync(s,
-				      (pin+s)->metrics4, (pin+s+1)->metrics4,
-				      &discr);
-		if ( bytenum*8 > TRACEBACK ) totaldiscr[s] += discr;
-	      }
-	      byte = (byte<<1) | bits[current_sync];
-	    }
-	  } else {
-	    // Otherwise run only the selected decoder
-	    for ( int b=0; b<8; ++b,pin+=2 ) {
-	      TUS bit = update_sync(current_sync,
-				    (pin+current_sync)->metrics4,
-				    (pin+current_sync+1)->metrics4, NULL);
-	      byte = (byte<<1) | bit;
-	    }
-	  }
-	  in.read(16);
-	  out.write(byte);
-	}  // chunk_size
- 	if ( ! resync_phase ) {
-	  // Switch to another decoder ?
-	  int best = current_sync;
-	  for ( int s=0; s<NSYNCS; ++s )
-	    if ( totaldiscr[s] > totaldiscr[best] ) best = s;
-	  if ( best != current_sync ) {
-	    if ( sch->debug ) fprintf(stderr, "{%d->%d}", current_sync, best);
-	    current_sync = best;
-	  }
-	}
-	if ( ++resync_phase >= resync_period ) resync_phase = 0;
-      }
-    }
-
-  };  // viterbi_sync_bpsk
 
 }  // namespace
 

@@ -1,3 +1,9 @@
+HEAD
+  * leandvb, leandvbtx: DVB-S with non-standard constellations (with --viterbi).
+  * leandvb: Support all DVB-S code rates with --viterbi.
+  * leandvbtx: Support all DVB-S code rates.
+  * New viterbi_sync with simplified metrics (may degrade QPSK sensitivity).
+
 2017-07-23 v1.2.0
   * Fixed --hs mode on x86_64.
   * Added --s8, --s16, --u16.

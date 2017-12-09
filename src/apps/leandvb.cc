@@ -417,15 +417,14 @@ int run(config &cfg) {
   if ( cfg.standard == config::DVB_S ) {
     if ( cfg.constellation != cstln_lut<256>::QPSK &&
 	 cfg.constellation != cstln_lut<256>::BPSK )
-      fail("Invalid constellation for DVB-S");
-    demod.cstln = new cstln_lut<256>(cfg.constellation);
+      fprintf(stderr, "Warning: non-standard constellation for DVB-S\n");
   }    
   if ( cfg.standard == config::DVB_S2 ) {
     // For DVB-S2 testing only.
     // Constellation should be determined from PL signalling.
     fprintf(stderr, "DVB-S2: Testing symbol sampler only.\n");
-    demod.cstln = make_dvbs2_constellation(cfg.constellation, cfg.fec);
   }
+  demod.cstln = make_dvbs2_constellation(cfg.constellation, cfg.fec);
   if ( cfg.hard_metric ) {
     if ( cfg.verbose )
       fprintf(stderr, "Using hard metric.\n");
@@ -482,15 +481,14 @@ int run(config &cfg) {
   deconvol_sync_simple *r_deconv = NULL;
 
   if ( cfg.viterbi ) {
-    if ( cfg.fec != FEC12 )
-      fail("Viterbi only for code rate 1/2");
-    if ( cfg.constellation == cstln_lut<256>::QPSK ) {
-      viterbi_sync *r = new viterbi_sync(&sch, p_symbols, p_bytes);
-      if ( cfg.fastlock ) r->resync_period = 1;
-    } else {
-      viterbi_sync_bpsk *r = new viterbi_sync_bpsk(&sch, p_symbols, p_bytes);
-      if ( cfg.fastlock ) r->resync_period = 1;
-    }      
+    if ( cfg.fec==FEC23 && (demod.cstln->nsymbols==4 ||
+			    demod.cstln->nsymbols==64) ) {
+      if ( cfg.verbose ) fprintf(stderr, "Handling rate 2/3 as 4/6\n");
+      cfg.fec = FEC46;
+    }
+    viterbi_sync *r = new viterbi_sync(&sch, p_symbols, p_bytes,
+				       demod.cstln, cfg.fec);
+    if ( cfg.fastlock ) r->resync_period = 1;
   } else {
     r_deconv = make_deconvol_sync_simple(&sch, p_symbols, p_bytes, cfg.fec);
     r_deconv->fastlock = cfg.fastlock;
@@ -921,7 +919,10 @@ void usage(const char *name, FILE *f, int c) {
 	  "  --tune HZ      Bias frequency for demodulation\n"
 	  "  --drift        Track frequency drift beyond safe limits\n"
 	  "  --standard S   DVB-S (default), DVB-S2 (not implemented)\n"
-	  "  --const C      QPSK (default), BPSK .. 32APSK (DVB-S2 only)\n"
+	  "  --const C      QPSK (default),\n"
+	  "                 BPSK .. 32APSK (DVB-S2),\n"
+	  "                 64APSKe (DVB-S2X),\n"
+	  "                 16QAM .. 256QAM (experimental)\n"
 	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
 	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
 	  "  --sampler      nearest, linear, rrc\n"
@@ -1000,6 +1001,14 @@ int main(int argc, const char *argv[]) {
 	cfg.constellation = cstln_lut<256>::APSK16;
       else if ( ! strcmp(argv[i], "32APSK" ) )
 	cfg.constellation = cstln_lut<256>::APSK32;
+      else if ( ! strcmp(argv[i], "64APSKe" ) )
+	cfg.constellation = cstln_lut<256>::APSK64E;
+      else if ( ! strcmp(argv[i], "16QAM" ) )
+	cfg.constellation = cstln_lut<256>::QAM16;
+      else if ( ! strcmp(argv[i], "64QAM" ) )
+	cfg.constellation = cstln_lut<256>::QAM64;
+      else if ( ! strcmp(argv[i], "256QAM" ) )
+	cfg.constellation = cstln_lut<256>::QAM256;
       else usage(argv[0], stderr, 1);
     }
     else if ( ! strcmp(argv[i], "--cr") && i+1<argc ) {

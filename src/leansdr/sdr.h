@@ -257,8 +257,8 @@ namespace leansdr {
   };  // simple_agc
 
 
-  typedef unsigned short u_angle;  //  [0,2PI[ in 65536 steps
-  typedef signed short s_angle;  // [-PI,PI[ in 65536 steps
+  typedef uint16_t u_angle;  //  [0,2PI[ in 65536 steps
+  typedef int16_t s_angle;  // [-PI,PI[ in 65536 steps
 
 
   // GENERIC CONSTELLATION DECODING BY LOOK-UP TABLE.
@@ -268,8 +268,8 @@ namespace leansdr {
   // Up to 256 symbols.
   
   struct softsymbol {
-    unsigned short metrics4[4];  // For Viterbi QPSK
-    unsigned char symbol; // 000000IQ for QPSK
+    int16_t cost;  // For Viterbi with TBM=int16_t
+    uint8_t symbol;
   };
 
   // Target RMS amplitude for AGC
@@ -283,10 +283,20 @@ namespace leansdr {
   struct cstln_lut {
     complex<signed char> *symbols;
     int nsymbols;
-    enum predef { BPSK, QPSK, PSK8, APSK16, APSK32 };
-    cstln_lut(predef type, float gamma1=1, float gamma2=1) {
+    int nrotations;
+
+    enum predef {
+      BPSK,                    // DVB-S2 (and DVB-S variant)
+      QPSK,                    // DVB-S
+      PSK8, APSK16, APSK32,    // DVB-S2
+      APSK64E,                 // DVB-S2X
+      QAM16, QAM64, QAM256     // For experimentation only
+    };
+
+    cstln_lut(predef type, float gamma1=1, float gamma2=1, float gamma3=1) {
       switch ( type ) {
       case BPSK:
+	nrotations = 2;
 	nsymbols = 2;
 	symbols = new complex<signed char>[nsymbols];
 #if 0  // BPSK at 0°
@@ -301,6 +311,7 @@ namespace leansdr {
       case QPSK:
 	// EN 300 421, section 4.5 Baseband shaping and modulation
 	// EN 302 307, section 5.4.1
+	nrotations = 4;
 	nsymbols = 4;
 	symbols = new complex<signed char>[nsymbols];
 	symbols[0] = polar(1, 4, 0.5);
@@ -311,10 +322,11 @@ namespace leansdr {
 	break;
       case PSK8:
 	// EN 302 307, section 5.4.2
+	nrotations = 8;
 	nsymbols = 8;
 	symbols = new complex<signed char>[nsymbols];
-	symbols[0] = polar(1, 8, 0);
-	symbols[1] = polar(1, 8, 7);
+	symbols[0] = polar(1, 8, 1);
+	symbols[1] = polar(1, 8, 0);
 	symbols[2] = polar(1, 8, 4);
 	symbols[3] = polar(1, 8, 5);
 	symbols[4] = polar(1, 8, 2);
@@ -327,6 +339,7 @@ namespace leansdr {
 	// EN 302 307, section 5.4.3
 	float r1 = sqrtf(4 / (1+3*gamma1*gamma1));
 	float r2 = gamma1 * r1;
+	nrotations = 4;
 	nsymbols = 16;
 	symbols = new complex<signed char>[nsymbols];
 	symbols[0]  = polar(r2, 12,  1.5);
@@ -353,6 +366,7 @@ namespace leansdr {
 	float r1 = sqrtf(8 / (1+3*gamma1*gamma1+4*gamma2*gamma2));
 	float r2 = gamma1 * r1;
 	float r3 = gamma2 * r1;
+	nrotations = 4;
 	nsymbols = 32;
 	symbols = new complex<signed char>[nsymbols];
 	symbols[0]  = polar(r2, 12,  1.5);
@@ -390,6 +404,44 @@ namespace leansdr {
 	make_lut_from_symbols();
 	break;
       }
+      case APSK64E: {
+	// EN 302 307-2, section 5.4.5, Table 13e
+	float r1 =
+	  sqrtf(64 / (4+12*gamma1*gamma1+20*gamma2*gamma2+28*gamma3*gamma3));
+	float r2 = gamma1 * r1;
+	float r3 = gamma2 * r1;
+	float r4 = gamma3 * r1;
+	nrotations = 4;
+	nsymbols = 64;
+	symbols = new complex<signed char>[nsymbols];
+	polar2( 0, r4,  1.0/ 4,  7.0/4,   3.0/ 4,  5.0/ 4);
+	polar2( 4, r4, 13.0/28, 43.0/28, 15.0/28, 41.0/28);
+	polar2( 8, r4,  1.0/28, 55.0/28, 27.0/28, 29.0/28);
+	polar2(12, r1,  1.0/ 4,  7.0/ 4,  3.0/ 4,  5.0/ 4);
+	polar2(16, r4,  9.0/28, 47.0/28, 19.0/28, 37.0/28);
+	polar2(20, r4, 11.0/28, 45.0/28, 17.0/28, 39.0/28);
+	polar2(24, r3,  1.0/20, 39.0/20, 19.0/20, 21.0/20);
+	polar2(28, r2,  1.0/12, 23.0/12, 11.0/12, 13.0/12);
+	polar2(32, r4,  5.0/28, 51.0/28, 23.0/28, 33.0/28); 
+	polar2(36, r3,  9.0/20, 31.0/20, 11.0/20, 29.0/20);
+	polar2(40, r4,  3.0/28, 53.0/28, 25.0/28, 31.0/28);
+	polar2(44, r2,  5.0/12, 19.0/12,  7.0/12, 17.0/12);
+	polar2(48, r3,  1.0/ 4,  7.0/ 4,  3.0/ 4,  5.0/ 4);
+	polar2(52, r3,  7.0/20, 33.0/20, 13.0/20, 27.0/20);
+	polar2(56, r3,  3.0/20, 37.0/20, 17.0/20, 23.0/20);
+	polar2(60, r2,  1.0/ 4,  7.0/ 4,  3.0/ 4,  5.0/ 4);
+	make_lut_from_symbols();
+	break;
+      }
+      case QAM16:
+	make_qam(16);
+	break;
+      case QAM64:
+	make_qam(64);
+	break;
+      case QAM256:
+	make_qam(256);
+	break;
       default:
 	fail("Constellation not implemented");
       }
@@ -401,7 +453,7 @@ namespace leansdr {
     inline result *lookup(float I, float Q) {
       // Handling of overflows beyond the lookup table:
       // - For BPSK/QPSK/8PSK we only care about the phase,
-      //   so the following is fine.
+      //   so the following is harmless and improves locking at low SNR.
       // - For amplitude modulations this is not appropriate.
       //   However, if there is enough noise to cause overflow,
       //   demodulation would probably fail anyway.
@@ -424,28 +476,68 @@ namespace leansdr {
       float a = i * 2*M_PI / n;
       return complex<signed char>(r*cosf(a)*cstln_amp, r*sinf(a)*cstln_amp);
     }
+    // Helper function for some constellation tables
+    void polar2(int i, float r, float a0, float a1, float a2, float a3) {
+      float a[] = { a0, a1, a2, a3 };
+      for ( int j=0; j<4; ++j ) {
+	float phi = a[j] * M_PI;
+	symbols[i+j] = complex<signed char>(r*cosf(phi)*cstln_amp,
+					    r*sinf(phi)*cstln_amp);
+      }
+    }
+    void make_qam(int n) {
+      nrotations = 4;
+      nsymbols = n;
+      symbols = new complex<signed char>[nsymbols];
+      int m = sqrtl(n);
+      float scale;
+      { // Average power in first quadrant with unit grid
+	int q = m / 2;
+	float avgpower = 2*(q*0.25+(q-1)*q/2+(q-1)*q*(2*q-1)/6) / q;
+	scale = 1.0 / sqrtf(avgpower);
+      }
+      // Arbitrary mapping
+      int s = 0;
+      for ( int x=0; x<m; ++x )
+	for ( int y=0; y<m; ++y ) {
+	  float I = x - (float)(m-1)/2;
+	  float Q = y - (float)(m-1)/2;
+	  symbols[s].re = I * scale * cstln_amp;
+	  symbols[s].im = Q * scale * cstln_amp;
+	  ++s;
+	}
+      make_lut_from_symbols();
+    }
     result lut[R][R];
     void make_lut_from_symbols() {
       for ( int I=-R/2; I<R/2; ++I )
 	for ( int Q=-R/2; Q<R/2; ++Q ) {
 	  result *pr = &lut[I&(R-1)][Q&(R-1)];
-	  unsigned int dmin = R*2;
-	  unsigned char smin = 0;
+	  // Simplified metric:
+	  // Distance to nearest minus distance to second-nearest.
+	  // Null at edge of decision regions
+	  // => Suitable for Viterbi with partial metrics.
+	  uint8_t nearest = 0;
+	  int32_t cost=R*R*2, cost2=R*R*2;
 	  for ( int s=0; s<nsymbols; ++s ) {
-	    unsigned int d2 =
+	    int32_t d2 =
 	      (I-symbols[s].re)*(I-symbols[s].re) +
 	      (Q-symbols[s].im)*(Q-symbols[s].im);
-	    if ( d2 > 65535 ) fail("Unexpected constellation");
-	    unsigned int d = sqrtf(d2);
-	    if ( d < dmin ) { dmin=d; smin=s; }
-	    if ( nsymbols <= 4 ) {
-	      pr->ss.metrics4[s] = d2;
+	    if ( d2 < cost ) {
+	      cost2 = cost;
+	      cost = d2;
+	      nearest = s;
+	    } else if ( d2 < cost2 ) {
+	      cost2 = d2;
 	    }
 	  }
-	  float ph_symbol = atan2f(symbols[smin].im,symbols[smin].re);
+	  if ( cost > 32767 ) cost = 32767;
+	  if ( cost2 > 32767 ) cost2 = 32767;
+	  pr->ss.cost = cost - cost2;
+	  pr->ss.symbol = nearest;
+	  float ph_symbol = atan2f(symbols[pr->ss.symbol].im,
+				   symbols[pr->ss.symbol].re);
 	  float ph_err = atan2f(Q,I) - ph_symbol;
-	  if ( dmin > 255 ) fail("dmin overflow");
-	  pr->ss.symbol = smin;
 	  pr->phase_error = (s32)(ph_err * 65536 / (2*M_PI));  // Mod 65536
 	}
     }
@@ -455,22 +547,11 @@ namespace leansdr {
     void harden() {
       for ( int i=0; i<R; ++i )
 	for ( int q=0; q<R; ++q ) {
-	  unsigned short *m = lut[i][q].ss.metrics4;
-	  int best;
-	  if ( nsymbols == 2 ) {
-	    best = (m[0]<m[1]) ? 0 : 1;
-	    m[0] = (best==0) ? 0 : 1;
-	    m[1] = (best==1) ? 0 : 1;
-	  } else {
-	    if ( m[0]<=m[1] && m[0]<=m[2] && m[0]<=m[3] ) best = 0;
-	    else if ( m[1]<=m[2] && m[1]<=m[3] ) best = 1;
-	    else if ( m[2]<=m[3] ) best = 2;
-	    else best = 3;
-	    for ( int s=0; s<4; ++s )
-	      m[s] = hamming_weight((uint8_t)(s^best));
-	  }
-	}
-    }
+         softsymbol *ss = &lut[i][q].ss;
+	 if ( ss->cost < 0 ) ss->cost = -1;
+	 if ( ss->cost > 0 ) ss->cost = 1;
+       }  // for I,Q
+     }
 
   };  // cstln_lut
 
@@ -667,7 +748,7 @@ namespace leansdr {
       float freq_alpha = 0.04;
       float freq_beta = 0.0012 / omega * pll_adjustment;
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
-      
+
       int max_meas = chunk_size/meas_decimation + 1;
       // Large margin on output_size because mu adjustments
       // can lead to more than chunk_size/min_omega symbols.
@@ -677,7 +758,7 @@ namespace leansdr {
 	      ( !ss_out    || ss_out   ->writable()>=max_meas ) &&
 	      ( !mer_out   || mer_out  ->writable()>=max_meas ) &&
 	      ( !cstln_out || cstln_out->writable()>=max_meas ) ) {
-	
+
 	sampler->update_freq(freqw);
 
 	complex<T> *pin=in.rd(), *pin0=pin, *pend=pin+chunk_size;
@@ -687,7 +768,7 @@ namespace leansdr {
 	complex<float> sg; // Symbol before AGC;
 	complex<float> s;  // For MER estimation and constellation viewer
 	complex<signed char> *cstln_point = NULL;
-	
+
 	while ( pin < pend ) {
 	  // Here mu is the time of the next symbol counted from 0 at pin.
 	  if ( mu < 1 ) {
@@ -894,7 +975,7 @@ namespace leansdr {
       if ( ! freq_beta ) fail("Excessive oversampling");
 
       float gain_mu = 0.02 / (cstln_amp*cstln_amp) * 2;
-      
+
       int max_meas = chunk_size/meas_decimation + 1;
       // Largin margin on output_size because mu adjustments
       // can lead to more than chunk_size/min_omega symbols.
@@ -908,7 +989,7 @@ namespace leansdr {
 
 	cu8 s;
 	u_angle symbol_arg = 0;  // Exported for constellation viewer
-	
+
 	while ( pin < pend ) {
 	  // Here mu is the time of the next symbol counted from 0 at pin.
 	  if ( mu < 1 ) {

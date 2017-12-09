@@ -5,6 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+// This is a generic implementation of Viterbi with explicit
+// representation of the trellis.  There is special support for
+// convolutional coding, but the code can handle other schemes.
+// TBD This is very inefficient. For a specific trellis all loops
+// can be be unrolled.
+
 namespace leansdr {
 
   // TS is an integer type for a least NSTATES+1 states.
@@ -34,20 +40,24 @@ namespace leansdr {
 	  states[s].branches[cs].pred = NOSTATE;
     }
 
-    void init_convolutional(uint64_t G[]) {
+    // TBD Polynomial width should be a template parameter ?
+    void init_convolutional(const uint16_t G[]) {
       if ( NCS & (NCS-1) )  {
 	fprintf(stderr, "NCS must be a power of 2\n");
 	exit(1);
       }
       // Derive number of polynomials from NCS.
-      int nG;
-      for ( nG=1; (1<<nG)<NCS; ++nG ) ;
+      int nG = log2(NCS);
 
       for ( TS s=0; s<NSTATES; ++s ) {
 	for ( TUS us=0; us<NUS; ++us ) {
 	  // Run the convolutional encoder from state s with input us
-	  uint64_t shiftreg = s | (us*NSTATES);
-	  uint32_t cs = 0;
+	  uint64_t shiftreg = s;  // TBD type
+	  // Reverse bits
+	  TUS us_rev = 0;
+	  for ( int b=1; b<NUS; b*=2 ) if ( us & b ) us_rev |= (NUS/2/b);
+	  shiftreg |= us_rev * NSTATES;
+	  uint32_t cs = 0;  // TBD type
 	  for ( int g=0; g<nG; ++g )
 	    cs = (cs<<1) | parity(shiftreg&G[g]);
 	  shiftreg /= NUS;  // Shift bits for 1 uncoded symbol
@@ -65,7 +75,7 @@ namespace leansdr {
     }
 
     void dump() {
-      for ( TS s=0; s<NSTATES; ++s ) {
+      for ( int s=0; s<NSTATES; ++s ) {
 	fprintf(stderr, "State %02x:", s);
 	for ( int cs=0; cs<NCS; ++cs ) {
 	  typename state::branch *b = &states[s].branches[cs];
@@ -80,12 +90,23 @@ namespace leansdr {
 
   };
 
+  // Interface that hides the templated internals.
+  template<typename TUS,
+	   typename TCS,
+	   typename TBM,
+	   typename TPM>
+  struct viterbi_dec_interface {
+    virtual TUS update(TBM *costs, TPM *quality=NULL);
+    virtual TUS update(TCS s, TBM cost, TPM *quality=NULL);
+  };
+
   template<typename TS, int NSTATES,
 	   typename TUS, int NUS,
 	   typename TCS, int NCS,
 	   typename TBM, typename TPM,
 	   typename TP>
-  struct viterbi_dec {
+  struct viterbi_dec : viterbi_dec_interface<TUS,TCS,TBM,TPM> {
+
     trellis<TS, NSTATES, TUS, NUS, NCS> *trell;
 
     struct state {
@@ -102,17 +123,25 @@ namespace leansdr {
       states = &statebanks[0];
       newstates = &statebanks[1];
       for ( TS s=0; s<NSTATES; ++s ) (*states)[s].cost = 0;
+      // Determine max value that can fit in TPM
+      max_tpm = (TPM)0 - 1;
+      if ( max_tpm < 0 ) {
+	// TPM is signed
+	for ( max_tpm=0; max_tpm*2+1>max_tpm; max_tpm=max_tpm*2+1 ) ;
+      }
     }
+
+    // Update with full metric
     
     TUS update(TBM costs[NCS], TPM *quality=NULL) {
-      TPM best_tpm = -1LL, best2_tpm = -1LL;
+      TPM best_tpm = max_tpm, best2_tpm = max_tpm;
       TS best_state = 0;
       // Update all states
-      for ( TS s=0; s<NSTATES; ++s ) {
-	TPM best_m = -1LL;
+      for ( int s=0; s<NSTATES; ++s ) {
+	TPM best_m = max_tpm;
 	typename trellis<TS,NSTATES,TUS,NUS,NCS>::state::branch *best_b = NULL;
 	// Select best branch
-	for ( TCS cs=0; cs<NCS; ++cs ) {
+	for ( int cs=0; cs<NCS; ++cs ) {
 	  typename trellis<TS,NSTATES,TUS,NUS,NCS>::state::branch *b =
 	    &trell->states[s].branches[cs];
 	  if ( b->pred == trell->NOSTATE ) continue;
@@ -149,6 +178,77 @@ namespace leansdr {
       return (*states)[best_state].path.read();
     }
 
+    // Update with partial metrics.
+    // The costs provided must be negative.
+    // The other symbols will be assigned a cost of 0.
+
+    TUS update(int nm, TCS cs[], TBM costs[], TPM *quality=NULL) {
+      TPM best_tpm = max_tpm, best2_tpm = max_tpm;
+      TS best_state = 0;
+      // Update all states
+      for ( int s=0; s<NSTATES; ++s ) {
+	// Select best branch among those for with metrics are provided
+	TPM best_m = max_tpm;
+	typename trellis<TS,NSTATES,TUS,NUS,NCS>::state::branch *best_b = NULL;
+	for ( int im=0; im<nm; ++im ) {
+	  typename trellis<TS,NSTATES,TUS,NUS,NCS>::state::branch *b =
+	    &trell->states[s].branches[cs[im]];
+	  if ( b->pred == trell->NOSTATE ) continue;
+	  TPM m = (*states)[b->pred].cost + costs[im];
+	  if ( m <= best_m ) {  // <= guarantees one match
+	    best_m = m;
+	    best_b = b;
+	  }
+	}
+	if ( nm != NCS ) {
+	  // Also scan the other branches.
+	  // We actually rescan the branches with metrics.
+	  // This works because costs are negative.
+	  for ( int cs=0; cs<NCS; ++cs ) {
+	    typename trellis<TS,NSTATES,TUS,NUS,NCS>::state::branch *b =
+	      &trell->states[s].branches[cs];
+	    if ( b->pred == trell->NOSTATE ) continue;
+	    TPM m = (*states)[b->pred].cost;
+	    if ( m <= best_m ) {
+	      best_m = m;
+	      best_b = b;
+	    }
+	  }
+	}
+	(*newstates)[s].path = (*states)[best_b->pred].path;
+	(*newstates)[s].path.append(best_b->us);
+	(*newstates)[s].cost = best_m;
+	// Select best states
+	if ( best_m < best_tpm ) {
+	  best_state = s;
+	  best2_tpm = best_tpm;
+	  best_tpm = best_m;
+	} else if ( best_m < best2_tpm )
+	  best2_tpm = best_m;
+      }
+      // Swap banks
+      { statebank *tmp=states; states=newstates; newstates=tmp; }
+      // Prevent overflow of path metrics
+      for ( TS s=0; s<NSTATES; ++s ) (*states)[s].cost -= best_tpm;
+#if 0
+      // Observe that the min-max range remains bounded
+      fprintf(stderr,"-%2d = [", best_tpm);
+      for ( TS s=0; s<NSTATES; ++s ) fprintf(stderr," %d", (*states)[s].cost);
+      fprintf(stderr," ]\n");
+#endif
+      // Return difference between best and second-best as quality metric.
+      if ( quality ) *quality = best2_tpm - best_tpm;
+      // Return uncoded symbol of best path
+      return (*states)[best_state].path.read();
+    }
+
+    // Update with single-symbol metric.
+    // cost must be negative.
+
+    TUS update(TCS cs, TBM cost, TPM *quality=NULL) {
+      return update(1, &cs, &cost, quality);
+    }
+
     void dump() {
       fprintf(stderr, "[");
       for ( TS s=0; s<NSTATES; ++s )
@@ -157,6 +257,9 @@ namespace leansdr {
       fprintf(stderr, "\n");
     }
 
+
+  private:
+    TPM max_tpm;
   };
 
   // Paths (sequences of uncoded symbols) represented as bitstreams.

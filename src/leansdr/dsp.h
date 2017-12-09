@@ -94,7 +94,7 @@ namespace leansdr {
   private:
     int logn;
     int *bitrev;
-    complex<float> *omega, *omega_rev;
+    complex<T> *omega, *omega_rev;
     float invsqrtn;
   };
   
