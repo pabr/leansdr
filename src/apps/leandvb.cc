@@ -69,6 +69,8 @@ struct config {
   int fd_info;       // FD for status information in text format, or -1
   float Finfo;       // Desired refresh rate on fd_info (Hz)
   int fd_const;      // FD for constellation and symbols, or -1
+  int fd_spectrum;   // FD for spectrum data, or -1
+  bool json;         // Use JSON syntax
 
   config()
     : verbose(false),
@@ -110,13 +112,29 @@ struct config {
       linger(false),
       fd_info(-1),
       Finfo(5),
-      fd_const(-1) {
+      fd_const(-1),
+      fd_spectrum(-1),
+      json(false) {
   }
 };
 
 int decimation(float Fin, float Fout) {
   int d = Fin / Fout;
   return max(d, 1);
+}
+
+void output_initial_info(FILE *f, config &cfg) {
+  const char *quote = cfg.json ? "\"" : "";
+  static const char *standard_names[] = {
+    [config::DVB_S]="DVB-S",
+    [config::DVB_S2]="DVB-S2",
+  };
+  fprintf(f, "STANDARD %s%s%s\n", quote, standard_names[cfg.standard], quote);
+  fprintf(f, "CONSTELLATION %s%s%s\n",
+	  quote, cstln_names[cfg.constellation], quote);
+  fec_spec *fs = &fec_specs[cfg.fec];
+  fprintf(f, "CR %s%d/%d%s\n", quote, fs->bits_in, fs->bits_out, quote);
+  fprintf(f, "SR %f\n", cfg.Fm);
 }
 
 int run(config &cfg) {
@@ -291,6 +309,20 @@ int run(config &cfg) {
       fprintf(stderr, "Measuring CNR\n");
     r_cnr = new cnr_fft<f32>(&sch, *p_preprocessed, p_cnr, cfg.Fm/cfg.Fs);
     r_cnr->decimation = decimation(cfg.Fs, 1);  // 1 Hz
+  }
+
+  // SPECTRUM
+
+  pipebuf<f32[1024]> *p_spectrum = NULL;
+
+  if ( cfg.fd_spectrum ) {
+    if ( cfg.verbose )
+      fprintf(stderr, "Measuring SPD\n");
+    p_spectrum = new pipebuf<float[1024]>(&sch, "spectrum", BUF_SLOW);
+    spectrum<f32> *r_spectrum =
+      new spectrum<f32>(&sch, *p_preprocessed, *p_spectrum);
+    r_spectrum->decimation = decimation(cfg.Fs, 1);  // 1 Hz
+    r_spectrum->kavg = 0.5;
   }
 
   // FILTERING
@@ -561,9 +593,8 @@ int run(config &cfg) {
     new file_printer<float>(&sch, "VBER %.6f\n", p_vber, cfg.fd_info);
     // Output constants immediately
     FILE *f = fdopen(cfg.fd_info, "w");
-    static const char *fec_names[] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
-    fprintf(f, "CR %s\n", fec_names[cfg.fec]);
-    fprintf(f, "SR %f\n", cfg.Fm);
+    if ( ! f ) fatal("fdopen(fd_info)");
+    output_initial_info(f, cfg);
     fflush(f);
   }
   if ( cfg.fd_const >= 0 ) {
@@ -571,14 +602,40 @@ int run(config &cfg) {
     if ( c ) {
       // Output constellation immediately
       FILE *f = fdopen(cfg.fd_const, "w");
-      fprintf(f, "CONST %d", c->nsymbols);
-      for ( int i=0; i<c->nsymbols; ++i )
-	fprintf(f, " %d,%d", c->symbols[i].re, c->symbols[i].im);
-      fprintf(f, "\n");
+      if ( ! f ) fatal("fdopen(fd_const)");
+      if ( cfg.json ) {
+	fprintf(f, "CONST [");
+	for ( int i=0; i<c->nsymbols; ++i )
+	  fprintf(f, "%s[%d,%d]", i?",":"",
+		  c->symbols[i].re, c->symbols[i].im);
+	fprintf(f, "]\n");
+      } else {
+	fprintf(f, "CONST %d", c->nsymbols);
+	for ( int i=0; i<c->nsymbols; ++i )
+	  fprintf(f, " %d,%d", c->symbols[i].re, c->symbols[i].im);
+	fprintf(f, "\n");
+      }
       fflush(f);
     }
-    new file_carrayprinter<f32>(&sch, "SYMBOLS %d", " %.0f,%.0f", "\n",
-				p_sampled, cfg.fd_const);
+    file_carrayprinter<f32> *symbol_printer;
+    if ( cfg.json )
+      symbol_printer = new file_carrayprinter<f32>
+	(&sch, "SYMBOLS [", "[%.0f,%.0f]", ",", "]\n", p_sampled, cfg.fd_const);
+    else
+      symbol_printer =  new file_carrayprinter<f32>
+	(&sch, "SYMBOLS %d", " %.0f,%.0f", "", "\n", p_sampled, cfg.fd_const);
+    symbol_printer->fixed_size = 128;
+  }
+
+  if ( cfg.fd_spectrum >= 0 ) {
+    file_vectorprinter<f32,1024> *spectrum_printer;
+    if ( cfg.json )
+      spectrum_printer = new file_vectorprinter<f32,1024>
+	(&sch, "SPECTRUM [", "%.3f", ",", "]\n", *p_spectrum, cfg.fd_spectrum);
+    else
+      spectrum_printer = new file_vectorprinter<f32,1024>
+	(&sch, "SPECTRUM %d", " %.3f", "", "\n", *p_spectrum, cfg.fd_spectrum);
+    (void)spectrum_printer;
   }
 
   // TIMELINE SCOPE
@@ -830,14 +887,19 @@ int run_highspeed(config &cfg) {
     new file_printer<float>(&sch, "VBER %.6f\n", p_vber, cfg.fd_info);
     // Output constants immediately
     FILE *f = fdopen(cfg.fd_info, "w");
-    static const char *fec_names[] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
-    fprintf(f, "CR %s\n", fec_names[cfg.fec]);
-    fprintf(f, "SR %f\n", cfg.Fm);
+    if ( ! f ) fatal("fdopen(fd_info)");
+    output_initial_info(f, cfg);
     fflush(f);
   }
   if ( cfg.fd_const >= 0 ) {
-    new file_carrayprinter<u8>(&sch, "SYMBOLS %d", " %d,%d", "\n",
-				p_sampled, cfg.fd_const);
+    file_carrayprinter<u8> *symbol_printer;
+    if ( cfg.json ) 
+      symbol_printer = new file_carrayprinter<u8>
+	(&sch, "SYMBOLS [", "[%.0f,%.0f]", ",", "]\n", p_sampled, cfg.fd_const);
+    else
+      symbol_printer =  new file_carrayprinter<u8>
+	(&sch, "SYMBOLS %d", " %d,%d", "", "\n", p_sampled, cfg.fd_const);
+    symbol_printer->fixed_size = 128;
   }
 
   // TIMELINE SCOPE
@@ -952,6 +1014,8 @@ void usage(const char *name, FILE *f, int c) {
 	  "  -d             Output debugging info during operation\n"
 	  "  --fd-info NUM  Output demodulator status to file descriptor\n"
 	  "  --fd-const NUM Output constellation and symbols to file descr\n"
+	  "  --fd-spectrum NUM Output spectrum to file descr\n"
+	  "  --json         Use JSON syntax\n"
 	  );
 #ifdef GUI
   fprintf(f,
@@ -1109,6 +1173,10 @@ int main(int argc, const char *argv[]) {
       cfg.fd_info = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--fd-const") && i+1<argc )
       cfg.fd_const = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--fd-spectrum") && i+1<argc )
+      cfg.fd_spectrum = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--json") )
+      cfg.json = true;
     else
       usage(argv[0], stderr, 1);
   }

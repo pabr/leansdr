@@ -555,6 +555,17 @@ namespace leansdr {
 
   };  // cstln_lut
 
+  static const char *cstln_names[] = {
+    [cstln_lut<256>::BPSK]    = "BPSK",
+    [cstln_lut<256>::QPSK]    = "QPSK",
+    [cstln_lut<256>::PSK8]    = "8PSK",
+    [cstln_lut<256>::APSK16]  = "16APSK",
+    [cstln_lut<256>::APSK32]  = "32APSK",
+    [cstln_lut<256>::APSK64E] = "64APSKe",
+    [cstln_lut<256>::QAM16]   = "16QAM",
+    [cstln_lut<256>::QAM64]   = "64QAM",
+    [cstln_lut<256>::QAM256]  = "256QAM"
+  };
 
   // SAMPLER INTERFACE FOR CSTLN_RECEIVER
   
@@ -1315,7 +1326,67 @@ namespace leansdr {
     T *avgpower;
     int phase;
   };  // cnr_fft
-  
+
+  template<typename T>
+  struct spectrum : runnable {
+    static const int nfft = 1024;
+    spectrum(scheduler *sch, pipebuf< complex<T> > &_in,
+	     pipebuf<float[nfft]> &_out)
+      : runnable(sch, "spectrum"),
+	decimation(1048576), kavg(0.1),
+	in(_in), out(_out),
+	fft(nfft), avgpower(NULL), phase(0) {
+    }
+
+    int decimation;
+    float kavg;
+
+    void run() {
+      while ( in.readable()>=fft.n && out.writable()>=1 ) {
+	phase += fft.n;
+	if ( phase >= decimation ) {
+	  phase -= decimation;
+	  do_spectrum();
+	}
+	in.read(fft.n);
+      }
+    }
+
+  private:
+
+    void do_spectrum() {
+      complex<T> data[fft.n];
+      memcpy(data, in.rd(), fft.n*sizeof(data[0]));
+      fft.inplace(data, true);
+      float power[nfft];
+      for ( int i=0; i<fft.n; ++i )
+	power[i] = (float)data[i].re*data[i].re + (float)data[i].im*data[i].im;
+      if ( ! avgpower ) {
+	// Initialize with first spectrum
+	avgpower = new float[fft.n];
+	memcpy(avgpower, power, fft.n*sizeof(avgpower[0]));
+      }
+      // Accumulate and low-pass filter
+      for ( int i=0; i<fft.n; ++i )
+	avgpower[i] = avgpower[i]*(1-kavg) + power[i]*kavg;
+
+      // Reuse power[]
+      for ( int i=0; i<fft.n/2; ++i ) {
+	power[i] = 10 * log10f(avgpower[nfft/2+i]);
+	power[nfft/2+i] = 10 * log10f(avgpower[i]);
+      }
+      memcpy(out.wr(), power, sizeof(power[0])*nfft);
+      out.written(1);
+    }
+
+    pipereader< complex<T> > in;
+    pipewriter< float[nfft] > out;
+    cfft_engine<T> fft;
+    T *avgpower;
+    int phase;
+  };  // spectrum
+
+
 }  // namespace
 
 #endif  // LEANSDR_SDR_H

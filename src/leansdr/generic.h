@@ -115,7 +115,7 @@ private:
   int phase;
 };
 
-// [file_listprinter] writes all data available from a [pipebuf]
+// [file_carrayprinter] writes all data available from a [pipebuf]
 // to a file descriptor on a single line.
 // Special case for complex.
 
@@ -124,29 +124,69 @@ struct file_carrayprinter : runnable {
   file_carrayprinter(scheduler *sch,
 		     const char *_head,
 		     const char *_format,
+		     const char *_sep,
 		     const char *_tail,
 		     pipebuf< complex<T> > &_in, int _fdout) :
     runnable(sch, _in.name),
-    scale(1), in(_in),
-    head(_head), format(_format), tail(_tail),
+    scale(1), fixed_size(0), in(_in),
+    head(_head), format(_format), sep(_sep), tail(_tail),
     fout(fdopen(_fdout,"w")) {
   }
   void run() {
-    int n = in.readable();
-    if ( n && fout ) {
-      fprintf(fout, head, n);
-      complex<T> *pin=in.rd(), *pend=pin+n;
-      for ( ; pin<pend; ++pin )
-	fprintf(fout, format, pin->re*scale, pin->im*scale);
-      fprintf(fout, "%s", tail);
+    int n, nmin = fixed_size ? fixed_size : 1;
+    while ( (n=in.readable()) >= nmin ) {
+      if ( fixed_size ) n = fixed_size;
+      if ( fout ) {
+	fprintf(fout, head, n);
+	complex<T> *pin = in.rd();
+	for ( int i=0; i<n; ++i ) {
+	  if ( i ) fprintf(fout, "%s", sep);
+	  fprintf(fout, format, pin[i].re*scale, pin[i].im*scale);
+	}
+	fprintf(fout, "%s", tail);
+      }
       fflush(fout);
+      in.read(n);
     }
-    in.read(n);
+  }
+  T scale;
+  int fixed_size;  // Number of elements per batch, or 0.
+private:
+  pipereader< complex<T> > in;
+  const char *head, *format, *sep, *tail;
+  FILE *fout;
+};
+
+template<typename T, int N>
+struct file_vectorprinter : runnable {
+  file_vectorprinter(scheduler *sch,
+		     const char *_head,
+		     const char *_format,
+		     const char *_sep,
+		     const char *_tail,
+		     pipebuf<T[N]> &_in, int _fdout) :
+    runnable(sch, _in.name), scale(1), in(_in),
+    head(_head), format(_format), sep(_sep), tail(_tail) {
+    fout = fdopen(_fdout,"w");
+    if ( ! fout ) fatal("fdopen");
+  }
+  void run() {
+    while ( in.readable() >= 1 ) {
+      fprintf(fout, head, N);
+      T (*pin)[N] = in.rd();
+      for ( int i=0; i<N; ++i ) {
+	if ( i ) fprintf(fout, "%s", sep);
+	fprintf(fout, format, (*pin)[i]*scale);
+      }
+      fprintf(fout, "%s", tail);
+      in.read(1);
+    }
+    fflush(fout);
   }
   T scale;
 private:
-  pipereader< complex<T> > in;
-  const char *head, *format, *tail;
+  pipereader<T[N]> in;
+  const char *head, *format, *sep, *tail;
   FILE *fout;
 };
 

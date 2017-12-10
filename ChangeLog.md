@@ -1,4 +1,5 @@
 HEAD
+  * leandvb: Spectrum output, JSON syntax.
   * leandvb, leandvbtx: DVB-S with non-standard constellations (with --viterbi).
   * leandvb: Support all DVB-S code rates with --viterbi.
   * leandvbtx: Support all DVB-S code rates.
