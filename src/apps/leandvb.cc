@@ -26,29 +26,29 @@ using namespace leansdr;
 
 struct config {
   bool verbose, debug;
-  bool highspeed;    // Demodulate raw u8 I/Q without preprocessing
+  bool highspeed;      // Demodulate raw u8 I/Q without preprocessing
   enum {
     INPUT_U8, INPUT_S8,
     INPUT_U16, INPUT_S16,
     INPUT_F32
   } input_format;
-  float float_scale; // Scaling factor for float data.
+  float float_scale;   // Scaling factor for float data.
   bool loop_input;
-  int input_buffer;  // Extra input buffer size
-  int buf_factor;    // Buffer sizing
-  float Fs;          // Sampling frequency (Hz) 
-  float Fderot;      // Shift the signal (Hz). Note: Ftune is faster
-  int anf;           // Number of auto notch filters
+  int input_buffer;    // Extra input buffer size
+  int buf_factor;      // Buffer sizing
+  float Fs;            // Sampling frequency (Hz) 
+  float Fderot;        // Shift the signal (Hz). Note: Ftune is faster
+  int anf;             // Number of auto notch filters
   bool cnr;            // Measure CNR
   unsigned int decim;  // Decimation, 0=auto
-  int fd_pp;         // FD for preprocessed data, or -1
-  float awgn;        // Standard deviation of noise
+  int fd_pp;           // FD for preprocessed data, or -1
+  float awgn;          // Standard deviation of noise
 
-  float Fm;          // QPSK symbol rate (Hz) 
+  float Fm;            // QPSK symbol rate (Hz) 
   enum dvb_version { DVB_S, DVB_S2 } standard;
   cstln_lut<256>::predef constellation;
   code_rate fec;
-  float Ftune;       // Bias frequency for the QPSK demodulator (Hz)
+  float Ftune;         // Bias frequency for the QPSK demodulator (Hz)
   bool allow_drift;
   bool fastlock;
   bool viterbi;
@@ -63,14 +63,14 @@ struct config {
   bool hdlc;           // Expect HDLC frames instead of MPEG packets
   bool packetized;     // Output frames with 16-bit BE length
 
-  bool gui;          // Plot stuff
-  float duration;    // Horizontal span of timeline GUI (s)
-  bool linger;       // Keep GUI running after EOF
-  int fd_info;       // FD for status information in text format, or -1
-  float Finfo;       // Desired refresh rate on fd_info (Hz)
-  int fd_const;      // FD for constellation and symbols, or -1
-  int fd_spectrum;   // FD for spectrum data, or -1
-  bool json;         // Use JSON syntax
+  bool gui;            // Plot stuff
+  float duration;      // Horizontal span of timeline GUI (s)
+  bool linger;         // Keep GUI running after EOF
+  int fd_info;         // FD for status information in text format, or -1
+  float Finfo;         // Desired refresh rate on fd_info (Hz)
+  int fd_const;        // FD for constellation and symbols, or -1
+  int fd_spectrum;     // FD for spectrum data, or -1
+  bool json;           // Use JSON syntax
 
   config()
     : verbose(false),
@@ -954,79 +954,88 @@ int run_highspeed(config &cfg) {
 
 // Command-line
  
-void usage(const char *name, FILE *f, int c) {
+void usage(const char *name, FILE *f, int c, const char *info=NULL) {
   fprintf(f, "Usage: %s [options]  < IQ  > TS\n", name);
   fprintf(f, "Demodulate DVB-S I/Q on stdin, output MPEG packets on stdout\n");
-  fprintf(f,
-	  "\nInput options:\n"
-	  "  --u8           Input format is 8-bit unsigned (rtl_sdr, default)\n"
-	  "  --f32          Input format is 32-bit float (gqrx)\n"
-	  "  -f HZ          Input sample rate (default: 2.4e6)\n"
-	  "  --loop         Repeat (stdin must be a file)\n"
-	  "  --inbuf N      Additional input buffering (samples)\n"
-	  );
-  fprintf(f,
-	  "\nPreprocessing options:\n"
-	  "  --anf N        Number of birdies to remove (default: 1)\n"
-	  "  --derotate HZ  For use with --fd-pp, otherwise use --tune\n"
-	  "  --resample     Resample baseband (CPU-intensive)\n"
-	  "  --resample-rej K  Aliasing rejection (default: 10)\n"
-	  "  --decim N      Decimate baseband (causes aliasing)\n"
-	  "  --cnr          Measure CNR (requires samplerate>3*symbolrate)\n"
-	  "  --fd-pp NUM    Dump preprocessed IQ data to file descriptor\n"
-	  );
-  fprintf(f,
-	  "\nDVB-S options:\n"
-	  "  --sr HZ        Symbol rate (default: 2e6)\n"
-	  "  --tune HZ      Bias frequency for demodulation\n"
-	  "  --drift        Track frequency drift beyond safe limits\n"
-	  "  --standard S   DVB-S (default), DVB-S2 (not implemented)\n"
-	  "  --const C      QPSK (default),\n"
-	  "                 BPSK .. 32APSK (DVB-S2),\n"
-	  "                 64APSKe (DVB-S2X),\n"
-	  "                 16QAM .. 256QAM (experimental)\n"
-	  "  --cr N/D       Code rate 1/2 (default) .. 7/8 .. 9/10\n"
-	  "  --fastlock     Synchronize more aggressively (CPU-intensive)\n"
-	  "  --sampler      nearest, linear, rrc\n"
-	  "  --rrc-steps N  RRC interpolation factor\n"
-	  "  --rrc-rej K    RRC filter rejection (defaut:10)\n"
-	  "  --roll-off A   RRC roll-off (default: 0.35)\n"
-	  "  --viterbi      Use Viterbi (CPU-intensive)\n"
-	  "  --hard-metric  Use Hamming distances with Viterbi\n"
-	  );
-  fprintf(f,
-	  "\nCompatibility options:\n"
-	  "  --hdlc         Expect HDLC frames instead of MPEG packets\n"
-	  "  --packetized   Output 16-bit length prefix (default: as stream)\n"
-	  );
-  fprintf(f,
-	  "\nGeneral options:\n"
-	  "  --buf-factor   Buffer size factor (default:4)\n"
-	  "  --hq           Maximize sensitivity\n"
-	  "                 (Enables all CPU-intensive features)\n"
-	  "  --hs           Maximize throughput (QPSK CR1/2 only)\n"
-	  "                 (Disables all preprocessing)\n"
-	  );
-  fprintf(f,
-	  "\nUI options:\n"
-	  "  -h             Display this help message and exit\n"
-	  "  -v             Output debugging info at startup and exit\n"
-	  "  -d             Output debugging info during operation\n"
-	  "  --fd-info NUM  Output demodulator status to file descriptor\n"
-	  "  --fd-const NUM Output constellation and symbols to file descr\n"
-	  "  --fd-spectrum NUM Output spectrum to file descr\n"
-	  "  --json         Use JSON syntax\n"
-	  );
+  fprintf
+    (f,
+     "\nInput options:\n"
+     "  --u8           Input format is 8-bit unsigned (rtl_sdr, default)\n"
+     "  --f32          Input format is 32-bit float (gqrx)\n"
+     "  -f HZ          Input sample rate (default: 2.4e6)\n"
+     "  --loop         Repeat (stdin must be a file)\n"
+     "  --inbuf INT    Additional input buffering (samples)\n"
+     );
+  fprintf
+    (f,
+     "\nPreprocessing options:\n"
+     "  --anf INT             Number of birdies to remove (default: 1)\n"
+     "  --derotate HZ         For use with --fd-pp, otherwise use --tune\n"
+     "  --resample            Resample baseband (CPU-intensive)\n"
+     "  --resample-rej FLOAT  Aliasing rejection (default: 10)\n"
+     "  --decim INT           Decimate baseband (causes aliasing)\n"
+     "  --cnr                 Measure CNR (requires samprate>3*symbrate)\n"
+     );
+  fprintf
+    (f,
+     "\nDVB-S options:\n"
+     "  --sr HZ           Symbol rate (default: 2e6)\n"
+     "  --tune HZ         Bias frequency for demodulation\n"
+     "  --drift           Track frequency drift beyond safe limits\n"
+     "  --standard S      DVB-S (default), DVB-S2 (not implemented)\n"
+     "  --const STRING    QPSK (default),\n"
+     "                    BPSK .. 32APSK (DVB-S2),\n"
+     "                    64APSKe (DVB-S2X),\n"
+     "                    16QAM .. 256QAM (experimental)\n"
+     "  --cr NUM/DEN      Code rate 1/2 (default) .. 7/8 .. 9/10\n"
+     "  --fastlock        Synchronize more aggressively (CPU-intensive)\n"
+     "  --sampler         nearest, linear, rrc\n"
+     "  --rrc-steps INT   RRC interpolation factor\n"
+     "  --rrc-rej FLOAT   RRC filter rejection (defaut:10)\n"
+     "  --roll-off FLOAT  RRC roll-off (default: 0.35)\n"
+     "  --viterbi         Use Viterbi (CPU-intensive)\n"
+     "  --hard-metric     Use Hamming distances with Viterbi\n"
+     );
+  fprintf
+    (f,
+     "\nCompatibility options:\n"
+     "  --hdlc         Expect HDLC frames instead of MPEG packets\n"
+     "  --packetized   Output 16-bit length prefix (default: as stream)\n"
+     );
+  fprintf
+    (f,
+     "\nGeneral options:\n"
+     "  --buf-factor INT  Buffer size factor (default:4)\n"
+     "  --hq              Maximize sensitivity\n"
+     "                    (Enables all CPU-intensive features)\n"
+     "  --hs              Maximize throughput (QPSK CR1/2 only)\n"
+     "                    (Disables all preprocessing)\n"
+     );
+  fprintf
+    (f,
+     "\nUI options:\n"
+     "  -h                   Display this help message and exit\n"
+     "  -v                   Output debugging info at startup and exit\n"
+     "  -d                   Output debugging info during operation\n"
+     "  --fd-pp FDNUM        Dump preprocessed IQ data to file descriptor\n"
+     "  --fd-info FDNUM      Output demodulator status to file descriptor\n"
+     "  --fd-const FDNUM     Output constellation and symbols to file descr\n"
+     "  --fd-spectrum FDNUM  Output spectrum to file descr\n"
+     "  --json               Use JSON syntax\n"
+     );
 #ifdef GUI
-  fprintf(f,
-	  "  --gui          Show constellation and spectrum (X11)\n"
-	  "  --duration S   Width of timeline plot (default: 60)\n"
-	  "  --linger       Keep GUI running after EOF\n"
-	  );
+  fprintf
+    (f,
+     "  --gui             Show constellation and spectrum (X11)\n"
+     "  --duration FLOAT  Width of timeline plot (s, default 60)\n"
+     "  --linger          Keep GUI running after EOF\n"
+     );
 #endif
-  fprintf(f, "\nTesting options:\n"
-	  "  --awgn STDDEV  Add white gaussian noise (slow)\n"
-	  );
+  fprintf
+    (f, "\nTesting options:\n"
+     "  --awgn FLOAT  Add white gaussian noise stddev (slow)\n"
+     );
+  if ( info ) fprintf(f, "** Error while processing '%s'\n", info);
   exit(c);
 }
 
@@ -1051,7 +1060,7 @@ int main(int argc, const char *argv[]) {
 	cfg.standard = config::DVB_S;
       else if ( ! strcmp(argv[i], "DVB-S2" ) )
 	cfg.standard = config::DVB_S2;
-      else usage(argv[0], stderr, 1);
+      else usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
       ++i;
