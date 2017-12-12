@@ -25,7 +25,7 @@ using namespace leansdr;
 // Main loop
 
 struct config {
-  bool verbose, debug;
+  bool verbose, debug, debug2;
   bool highspeed;      // Demodulate raw u8 I/Q without preprocessing
   enum {
     INPUT_U8, INPUT_S8,
@@ -75,6 +75,7 @@ struct config {
   config()
     : verbose(false),
       debug(false),
+      debug2(false),
       highspeed(false),
       input_format(INPUT_U8),
       float_scale(1.0),
@@ -435,7 +436,7 @@ int run(config &cfg) {
       (order, cfg.Fm/Frrc, cfg.rolloff, &coeffs);
     if ( cfg.verbose )
       fprintf(stderr, "RRC filter: %d coeffs.\n", ncoeffs);
-    if ( cfg.debug ) filtergen::dump_filter("rrc", ncoeffs, coeffs);
+    if ( cfg.debug2 ) filtergen::dump_filter("rrc", ncoeffs, coeffs);
     sampler = new fir_sampler<float,float>
       (ncoeffs, coeffs, cfg.rrc_steps);
     break;
@@ -1048,8 +1049,10 @@ int main(int argc, const char *argv[]) {
       usage(argv[0], stdout, 0);
     else if ( ! strcmp(argv[i], "-v") )
       cfg.verbose = true;
-    else if ( ! strcmp(argv[i], "-d") )
+    else if ( ! strcmp(argv[i], "-d") ) {
+      cfg.debug2 = cfg.debug;
       cfg.debug = true;
+    }
     else if ( ! strcmp(argv[i], "-f") && i+1<argc )
       cfg.Fs = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--sr") && i+1<argc )
@@ -1082,7 +1085,7 @@ int main(int argc, const char *argv[]) {
 	cfg.constellation = cstln_lut<256>::QAM64;
       else if ( ! strcmp(argv[i], "256QAM" ) )
 	cfg.constellation = cstln_lut<256>::QAM256;
-      else usage(argv[0], stderr, 1);
+      else usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--cr") && i+1<argc ) {
       ++i;
@@ -1096,7 +1099,7 @@ int main(int argc, const char *argv[]) {
       else if ( ! strcmp(argv[i], "4/5"  ) ) cfg.fec = FEC45;
       else if ( ! strcmp(argv[i], "8/9"  ) ) cfg.fec = FEC89;
       else if ( ! strcmp(argv[i], "9/10" ) ) cfg.fec = FEC910;
-      else usage(argv[0], stderr, 1);
+      else usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--fastlock") )
       cfg.fastlock = true;
@@ -1119,7 +1122,7 @@ int main(int argc, const char *argv[]) {
       if      (!strcmp(argv[i],"nearest")) cfg.sampler = config::SAMP_NEAREST;
       else if (!strcmp(argv[i],"linear" )) cfg.sampler = config::SAMP_LINEAR;
       else if (!strcmp(argv[i],"rrc"    )) cfg.sampler = config::SAMP_RRC;
-      else usage(argv[0], stderr, 1);
+      else usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--rrc-steps") && i+1<argc )
       cfg.rrc_steps = atoi(argv[++i]);
@@ -1187,7 +1190,7 @@ int main(int argc, const char *argv[]) {
     else if ( ! strcmp(argv[i], "--json") )
       cfg.json = true;
     else
-      usage(argv[0], stderr, 1);
+      usage(argv[0], stderr, 1, argv[i]);
   }
 
   if ( cfg.highspeed )
