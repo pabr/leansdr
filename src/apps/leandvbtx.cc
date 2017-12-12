@@ -48,12 +48,15 @@ struct config {
   int interp;
   int decim;
   float rolloff;
+  float rrc_rej;
+  enum { OUTPUT_F32, OUTPUT_S16 } output_format;
   bool verbose, debug;
   config()
-    : constellation(cstln_lut<256>::QPSK),
+    : constellation(cstln_lut<256>::QPSK), fec(FEC12),
       power(1.0), agc(false),
-      interp(2), decim(1), rolloff(0.35),
-    verbose(false), debug(false)
+      interp(2), decim(1), rolloff(0.35), rrc_rej(10),
+      output_format(OUTPUT_F32),
+      verbose(false), debug(false)
   { }
 };
     
@@ -111,7 +114,7 @@ void run(config &cfg) {
 
   pipebuf<cf32> p_interp(&sch, "interpolated", BUF_BASEBAND);
   float Fm = 1.0 / cfg.interp;
-  int order = cfg.interp * 10;
+  int order = cfg.interp * cfg.rrc_rej;
   float *coeffs;
   int ncoeffs = filtergen::root_raised_cosine
     (order, Fm, cfg.rolloff, &coeffs);
@@ -128,6 +131,7 @@ void run(config &cfg) {
     r_resampler(&sch, ncoeffs, coeffs,
 		p_iqsymbols, p_interp, cfg.interp, 1);
 
+  // TBD Combine interp and decim
   pipebuf<cf32> p_resampled(&sch, "resampled", BUF_BASEBAND);
   decimator<cf32> r_decim(&sch, cfg.decim, p_interp, p_resampled);
 
@@ -148,7 +152,20 @@ void run(config &cfg) {
 
   // IQ ON STDOUT
 
-  file_writer<cf32> r_stdout(&sch, *tail, 1);
+  switch ( cfg.output_format ) {
+  case config::OUTPUT_F32:
+    (void)new file_writer<cf32>(&sch, *tail, 1);
+    break;
+  case config::OUTPUT_S16: {
+    pipebuf<cs16> *p_stdout =
+      new pipebuf<cs16>(&sch, "stdout", BUF_BASEBAND);
+    (void)new cconverter<f32,0, int16_t,0, 32768,1>(&sch, *tail, *p_stdout);
+    (void)new file_writer<cs16>(&sch, *p_stdout, 1);
+    break;
+  }
+  default:
+    fail("Output format not implemented");
+  }
 
   sch.run();
   sch.shutdown();
@@ -162,16 +179,19 @@ void usage(const char *name, FILE *f, int c) {
   fprintf(f, "Modulate MPEG packets into a DVB-S baseband signal\n");
   fprintf(f, "Output float complex samples\n");
   fprintf
-    (f, "\nOptions:"
+    (f, "\nOptions:\n"
      "  --const STRING           QPSK (default),\n"
      "                           BPSK .. 32APSK (DVB-S2),\n"
      "                           64APSKe (DVB-S2X),\n"
      "                           16QAM .. 256QAM (experimental)\n"
      "  --cr STRING              1/2, 2/3, 3/4, 5/6, 7/8\n"
      "  -f INTERP[/DECIM]        Samples per symbols (default: 2)\n"
-     "  --roll-off R             RRC roll-off (defalt: 0.35)\n"
-     "  --power P                Output power (dB)\n"
+     "  --roll-off FLOAT         RRC roll-off (defalt: 0.35)\n"
+     "  --rrc-rej FLOAT          RRC filter rejection (defaut:10)\n"
+     "  --power FLOAT            Output power (dB)\n"
      "  --agc                    Better regulation of output power\n"
+     "  --f32                    Output 32-bit floats, range +-1.0 (default)\n"
+     "  --s16                    Output 16-bit ints\n"
      "  -v                       Verbose output\n"
      );
   exit(c);
@@ -231,10 +251,16 @@ int main(int argc, char *argv[]) {
     }
     else if ( ! strcmp(argv[i], "--roll-off") && i+1<argc )
       cfg.rolloff = atof(argv[++i]);
+    else if ( ! strcmp(argv[i], "--rrc-rej") && i+1<argc )
+      cfg.rrc_rej = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--power") && i+1<argc )
       cfg.power = expf(logf(10)*atof(argv[++i])/20);
     else if ( ! strcmp(argv[i], "--agc") )
       cfg.agc = true;
+    else if ( ! strcmp(argv[i], "--f32") )
+      cfg.output_format = config::OUTPUT_F32;
+    else if ( ! strcmp(argv[i], "--s16") )
+      cfg.output_format = config::OUTPUT_S16;
     else 
       usage(argv[0], stderr, 1);
   }
