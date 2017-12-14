@@ -43,7 +43,7 @@ private:
 struct config {
   cstln_lut<256>::predef constellation;
   code_rate fec;
-  float power;
+  float amp;       // Desired RMS constellation amplitude
   bool agc;
   int interp;
   int decim;
@@ -53,7 +53,7 @@ struct config {
   bool verbose, debug;
   config()
     : constellation(cstln_lut<256>::QPSK), fec(FEC12),
-      power(1.0), agc(false),
+      amp(1.0), agc(false),
       interp(2), decim(1), rolloff(0.35), rrc_rej(10),
       output_format(OUTPUT_F32),
       verbose(false), debug(false)
@@ -119,7 +119,7 @@ void run(config &cfg) {
   int ncoeffs = filtergen::root_raised_cosine
     (order, Fm, cfg.rolloff, &coeffs);
   // This yields about the desired power level even without AGC.
-  filtergen::normalize_power(ncoeffs, coeffs, cfg.power/cstln_amp);
+  filtergen::normalize_power(ncoeffs, coeffs, cfg.amp/cstln_amp);
 
   if ( sch.verbose )
     fprintf(stderr, "Interpolation: ratio %d/%d, rolloff %f, %d coeffs\n",
@@ -144,7 +144,7 @@ void run(config &cfg) {
       new pipebuf<cf32>(&sch, "AGC", BUF_BASEBAND);
     simple_agc<f32> *r_agc =
       new simple_agc<f32>(&sch, *tail, *p_agc);
-    r_agc->out_rms = cfg.power / sqrtf((float)cfg.interp/cfg.decim);
+    r_agc->out_rms = cfg.amp / sqrtf((float)cfg.interp/cfg.decim);
     // Adjust bandwidth for large interpolation ratios.
     r_agc->bw = 0.001 * cfg.decim / cfg.interp;
     tail = p_agc;
@@ -256,7 +256,7 @@ int main(int argc, char *argv[]) {
     else if ( ! strcmp(argv[i], "--rrc-rej") && i+1<argc )
       cfg.rrc_rej = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--power") && i+1<argc )
-      cfg.power = expf(logf(10)*atof(argv[++i])/20);
+      cfg.amp = expf(logf(10)*atof(argv[++i])/20);
     else if ( ! strcmp(argv[i], "--agc") )
       cfg.agc = true;
     else if ( ! strcmp(argv[i], "--f32") )
