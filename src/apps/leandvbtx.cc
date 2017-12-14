@@ -118,7 +118,7 @@ void run(config &cfg) {
   float *coeffs;
   int ncoeffs = filtergen::root_raised_cosine
     (order, Fm, cfg.rolloff, &coeffs);
-  // This yields the desired power level even without AGC.
+  // This yields about the desired power level even without AGC.
   filtergen::normalize_power(ncoeffs, coeffs, cfg.power/cstln_amp);
 
   if ( sch.verbose )
@@ -174,7 +174,7 @@ void run(config &cfg) {
 
 // Command-line
 
-void usage(const char *name, FILE *f, int c) {
+void usage(const char *name, FILE *f, int c, const char *info=NULL) {
   fprintf(f, "Usage: %s [options]  < TS  > IQ\n", name);
   fprintf(f, "Modulate MPEG packets into a DVB-S baseband signal\n");
   fprintf(f, "Output float complex samples\n");
@@ -186,14 +186,16 @@ void usage(const char *name, FILE *f, int c) {
      "                           16QAM .. 256QAM (experimental)\n"
      "  --cr STRING              1/2, 2/3, 3/4, 5/6, 7/8\n"
      "  -f INTERP[/DECIM]        Samples per symbols (default: 2)\n"
-     "  --roll-off FLOAT         RRC roll-off (defalt: 0.35)\n"
-     "  --rrc-rej FLOAT          RRC filter rejection (defaut:10)\n"
-     "  --power FLOAT            Output power (dB)\n"
+     "  --roll-off FLOAT         RRC roll-off (default: 0.35)\n"
+     "  --rrc-rej FLOAT          RRC filter rejection (defaut: 10)\n"
+     "  --power FLOAT            Output power (dB, default: 0)\n"
      "  --agc                    Better regulation of output power\n"
      "  --f32                    Output 32-bit floats, range +-1.0 (default)\n"
      "  --s16                    Output 16-bit ints\n"
-     "  -v                       Verbose output\n"
+     "  -v                       Output debugging info at startup and exit\n"
+     "  -d                       Output debugging info during operation\n"
      );
+  if ( info ) fprintf(f, "** Error while processing '%s'\n", info);
   exit(c);
 }
 
@@ -219,7 +221,7 @@ int main(int argc, char *argv[]) {
       else if ( ! strcmp(argv[i], "4/5"  ) ) cfg.fec = FEC45;
       else if ( ! strcmp(argv[i], "8/9"  ) ) cfg.fec = FEC89;
       else if ( ! strcmp(argv[i], "9/10" ) ) cfg.fec = FEC910;
-      else usage(argv[0], stderr, 1);
+      else usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
       ++i;
@@ -241,13 +243,13 @@ int main(int argc, char *argv[]) {
 	cfg.constellation = cstln_lut<256>::QAM64;
       else if ( ! strcmp(argv[i], "256QAM" ) )
 	cfg.constellation = cstln_lut<256>::QAM256;
-      else usage(argv[0], stderr, 1);
+      else usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "-f") && i+1<argc ) {
       ++i;
       cfg.decim = 1;
       if ( sscanf(argv[i], "%d/%d", &cfg.interp, &cfg.decim) < 1 )
-	usage(argv[0], stderr, 1);
+	usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--roll-off") && i+1<argc )
       cfg.rolloff = atof(argv[++i]);
@@ -262,7 +264,7 @@ int main(int argc, char *argv[]) {
     else if ( ! strcmp(argv[i], "--s16") )
       cfg.output_format = config::OUTPUT_S16;
     else 
-      usage(argv[0], stderr, 1);
+      usage(argv[0], stderr, 1, argv[i]);
   }
 
   run(cfg);
