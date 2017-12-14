@@ -515,6 +515,11 @@ namespace leansdr {
     DVBS_G1,    DVBS_G2,    // X1Y1
     DVBS_G2<<1, DVBS_G1<<2  // Y2X3
   };
+  static const uint16_t polys_fec45[] = {  // Non standard
+    DVBS_G1,    DVBS_G2,     // X1Y1
+    DVBS_G2<<1, DVBS_G1<<2,  // Y2X3
+    DVBS_G1<<3               // X4
+  };
   static const uint16_t polys_fec56[] = {
     DVBS_G1,    DVBS_G2,    // X1Y1
     DVBS_G2<<1, DVBS_G1<<2, // Y2X3
@@ -539,6 +544,7 @@ namespace leansdr {
     [FEC34] = { 3, 4, polys_fec34 },
     [FEC56] = { 5, 6, polys_fec56 },
     [FEC78] = { 7, 8, polys_fec78 },
+    [FEC45] = { 4, 5, polys_fec45 },  // Non-standard
   };
 
   struct dvb_convol : runnable {
@@ -1173,6 +1179,11 @@ namespace leansdr {
     typedef trellis<TS,64, TUS,8, 16> trellis_34;
     typedef viterbi_dec<TS,64, TUS,8, TCS,16, TBM, TPM, path_34> dvb_dec_34;
 
+    // 4/5: 6 bits of state, 4 bits in, 5 bits out (non-standard)
+    typedef bitpath<uint64_t,TUS,4,16> path_45;
+    typedef trellis<TS,64, TUS,16, 32> trellis_45;
+    typedef viterbi_dec<TS,64, TUS,16, TCS,32, TBM, TPM, path_45> dvb_dec_45;
+
     // 5/6: 6 bits of state, 5 bits in, 6 bits out
     typedef bitpath<uint64_t,TUS,5,12> path_56;
     typedef trellis<TS,64, TUS,32, 64> trellis_56;
@@ -1284,6 +1295,11 @@ namespace leansdr {
 	trellis_34 *trell = new trellis_34();
 	trell->init_convolutional(fec->polys);
 	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_34(trell);
+      }
+      else if ( cr == FEC45 ) {
+	trellis_45 *trell = new trellis_45();
+	trell->init_convolutional(fec->polys);
+	for ( int s=0; s<nsyncs; ++s ) syncs[s].dec = new dvb_dec_45(trell);
       }
       else if ( cr == FEC56 ) {
 	trellis_56 *trell = new trellis_56();
