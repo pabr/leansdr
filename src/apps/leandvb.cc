@@ -962,6 +962,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
     (f,
      "\nInput options:\n"
      "  --u8           Input format is 8-bit unsigned (rtl_sdr, default)\n"
+     "  --s16          Input format is 16-bit signed (plutosdr)\n"
      "  --f32          Input format is 32-bit float (gqrx)\n"
      "  -f HZ          Input sample rate (default: 2.4e6)\n"
      "  --loop         Repeat (stdin must be a file)\n"
