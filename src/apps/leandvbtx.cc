@@ -194,10 +194,15 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --s16                    Output 16-bit ints\n"
      "  -v                       Output debugging info at startup and exit\n"
      "  -d                       Output debugging info during operation\n"
+     "  --version                Display version and exit\n"
      );
   if ( info ) fprintf(f, "** Error while processing '%s'\n", info);
   exit(c);
 }
+
+#ifndef VERSION
+#define VERSION "undefined"
+#endif
 
 int main(int argc, char *argv[]) {
   config cfg;
@@ -209,6 +214,10 @@ int main(int argc, char *argv[]) {
       cfg.verbose = true;
     else if ( ! strcmp(argv[i], "-d") )
       cfg.debug = true;
+    else if ( ! strcmp(argv[i], "--version") ) {
+      printf("%s\n", VERSION);
+      exit(0);
+    }
     else if ( ! strcmp(argv[i], "--cr") && i+1<argc ) {
       ++i;
       // DVB-S

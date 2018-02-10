@@ -1019,6 +1019,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  -h                   Display this help message and exit\n"
      "  -v                   Output debugging info at startup and exit\n"
      "  -d                   Output debugging info during operation\n"
+     "  --version            Display version and exit\n"
      "  --fd-pp FDNUM        Dump preprocessed IQ data to file descriptor\n"
      "  --fd-info FDNUM      Output demodulator status to file descriptor\n"
      "  --fd-const FDNUM     Output constellation and symbols to file descr\n"
@@ -1041,6 +1042,9 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
   exit(c);
 }
 
+#ifndef VERSION
+#define VERSION "undefined"
+#endif
 
 int main(int argc, const char *argv[]) {
   config cfg;
@@ -1053,6 +1057,10 @@ int main(int argc, const char *argv[]) {
     else if ( ! strcmp(argv[i], "-d") ) {
       cfg.debug2 = cfg.debug;
       cfg.debug = true;
+    }
+    else if ( ! strcmp(argv[i], "--version") ) {
+      printf("%s\n", VERSION);
+      return 0;
     }
     else if ( ! strcmp(argv[i], "-f") && i+1<argc )
       cfg.Fs = atof(argv[++i]);
