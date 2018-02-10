@@ -96,8 +96,8 @@ namespace leansdr {
 	   typename TBM,
 	   typename TPM>
   struct viterbi_dec_interface {
-    virtual TUS update(TBM *costs, TPM *quality=NULL);
-    virtual TUS update(TCS s, TBM cost, TPM *quality=NULL);
+    virtual TUS update(TBM *costs, TPM *quality=NULL) = 0;
+    virtual TUS update(TCS s, TBM cost, TPM *quality=NULL) = 0;
   };
 
   template<typename TS, int NSTATES,
