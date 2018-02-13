@@ -64,12 +64,17 @@ clean::
 
 ARCH	:= $(shell uname -m)
 
-ifneq "$(findstring arm,$(ARCH))" ""
+ifeq "$(ARCH)" "armv7l"
 CXXFLAGS_EMBEDDED	= $(CXXFLAGS) -Ofast -mfpu=neon -funsafe-math-optimizations -fsingle-precision-constant
+LDFLAGS_EMBEDDED	= $(LDFLAGS) -static
+else
+ifeq "$(ARCH)" "armv6l"
+CXXFLAGS_EMBEDDED	= $(CXXFLAGS) -Ofast -funsafe-math-optimizations -fsingle-precision-constant
 LDFLAGS_EMBEDDED	= $(LDFLAGS) -static
 else
 CXXFLAGS_EMBEDDED	= $(CXXFLAGS)
 LDFLAGS_EMBEDDED	= $(LDFLAGS) -static
+endif
 endif
 
 embedded:	$(APPS:%=%.$(ARCH))
