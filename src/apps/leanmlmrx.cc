@@ -801,6 +801,12 @@ int main(int argc, char *argv[]) {
       cfg.info_rate = atof(argv[++i]);
     else if ( ! strcmp(argv[i],"--fd-control") && i+1<argc )
       cfg.fd_control = atoi(argv[++i]);
+    else if ( !strcmp(argv[i], "-h") )
+      usage(argv[0], stdout, 0);
+    else if ( ! strcmp(argv[i], "--version") ) {
+      printf("%s\n", VERSION);
+      exit(0);
+    }
     else if ( argv[i][0] == '-' )
       fail(argv[i]);
     else if ( sscanf(argv[i], "%lf:%lf:%lf", &fmin,&fstep,&fmax) == 3 ) {
@@ -816,12 +822,6 @@ int main(int argc, char *argv[]) {
     }
     else if ( sscanf(argv[i], "(%lf)", &fmin) == 1 ) {
       add_chan(&cfg, fmin, false);
-    }
-    else if ( !strcmp(argv[i], "-h") )
-      usage(argv[0], stdout, 0);
-    else if ( ! strcmp(argv[i], "--version") ) {
-      printf("%s\n", VERSION);
-      exit(0);
     }
     else
       usage(argv[0], stderr, 1, argv[i]);
