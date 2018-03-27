@@ -1,4 +1,8 @@
 HEAD
+  * leandvbtx: Added real-time mode (-fill).
+  * leansdrserv: Network access to leansdr command pipelines.
+  * leaniio{rx,tx}: PlutoSDR support via libiio.
+  * leanmlmrx: Multi-channel FM demodulator.
   * leandvb: Spectrum output, JSON syntax.
   * leandvb, leandvbtx: DVB-S with non-standard constellations (with --viterbi).
   * leandvb: Support all DVB-S code rates with --viterbi.

@@ -50,12 +50,14 @@ struct config {
   float rolloff;
   float rrc_rej;
   enum { OUTPUT_F32, OUTPUT_S16 } output_format;
+  bool fill;
   bool verbose, debug;
   config()
     : constellation(cstln_lut<256>::QPSK), fec(FEC12),
       amp(1.0), agc(false),
       interp(2), decim(1), rolloff(0.35), rrc_rej(10),
       output_format(OUTPUT_F32),
+      fill(false),
       verbose(false), debug(false)
   { }
 };
@@ -167,6 +169,14 @@ void run(config &cfg) {
     fail("Output format not implemented");
   }
 
+  if ( cfg.fill ) {
+    if ( cfg.verbose ) fprintf(stderr, "Realtime mode\n");
+    tspacket blank;
+    memset(blank.data, 0, 188);
+    blank.data[0] = 0x47;
+    r_stdin.set_realtime(blank);
+  }
+
   sch.run();
   sch.shutdown();
   if ( sch.verbose ) sch.dump();
@@ -192,6 +202,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --agc                    Better regulation of output power\n"
      "  --f32                    Output 32-bit floats, range +-1.0 (default)\n"
      "  --s16                    Output 16-bit ints\n"
+     "  --fill                   Insert blank packets\n"
      "  -v                       Output debugging info at startup and exit\n"
      "  -d                       Output debugging info during operation\n"
      "  --version                Display version and exit\n"
@@ -272,6 +283,8 @@ int main(int argc, char *argv[]) {
       cfg.output_format = config::OUTPUT_F32;
     else if ( ! strcmp(argv[i], "--s16") )
       cfg.output_format = config::OUTPUT_S16;
+    else if ( ! strcmp(argv[i], "--fill") )
+      cfg.fill = true;
     else 
       usage(argv[0], stderr, 1, argv[i]);
   }

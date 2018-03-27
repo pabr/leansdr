@@ -3,6 +3,8 @@
 
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 
 #include "leansdr/math.h"
 
@@ -20,6 +22,7 @@ struct file_reader : runnable {
   file_reader(scheduler *sch, int _fdin, pipebuf<T> &_out)
     : runnable(sch, _out.name),
       loop(false),
+      filler(NULL),
       fdin(_fdin), out(_out)
   {
   }
@@ -29,6 +32,11 @@ struct file_reader : runnable {
 
   again:
     ssize_t nr = read(fdin, out.wr(), size);
+    if ( nr<0 && errno==EWOULDBLOCK && filler ) {
+      if ( sch->debug ) fprintf(stderr, "U");
+      out.write(*filler);
+      return;
+    }
     if ( nr < 0 ) fatal("read");
     if ( ! nr ) {
       if ( ! loop ) return;
@@ -52,7 +60,13 @@ struct file_reader : runnable {
     out.written(nr / sizeof(T));
   }
   bool loop;
+  void set_realtime(T &_filler) {
+    int flags = fcntl(fdin, F_GETFL);
+    if ( fcntl(fdin, F_SETFL, flags|O_NONBLOCK) ) fatal("fcntl");
+    filler = new T(_filler);
+  }
 private:
+  T *filler;
   int fdin;
   pipewriter<T> out;
 };
