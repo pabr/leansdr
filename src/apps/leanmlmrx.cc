@@ -810,11 +810,11 @@ int main(int argc, char *argv[]) {
     else if ( argv[i][0] == '-' )
       fail(argv[i]);
     else if ( sscanf(argv[i], "%lf:%lf:%lf", &fmin,&fstep,&fmax) == 3 ) {
-      for ( double f=fmin; f<=fmax+1e-6; f+=fstep )
+      for ( double f=fmin; f<fmax+fstep/2; f+=fstep )
 	add_chan(&cfg, f, true);
     }
     else if ( sscanf(argv[i], "(%lf:%lf:%lf)", &fmin,&fstep,&fmax) == 3 ) {
-      for ( double f=fmin; f<=fmax+1e-6; f+=fstep )
+      for ( double f=fmin; f<fmax+fstep/2; f+=fstep )
 	add_chan(&cfg, f, false);
     }
     else if ( sscanf(argv[i], "%lf", &fmin) == 1 ) {
