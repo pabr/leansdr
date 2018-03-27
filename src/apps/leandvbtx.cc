@@ -211,10 +211,6 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
   exit(c);
 }
 
-#ifndef VERSION
-#define VERSION "undefined"
-#endif
-
 int main(int argc, char *argv[]) {
   config cfg;
 

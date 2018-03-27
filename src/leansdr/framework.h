@@ -1,10 +1,18 @@
+// This file is part of LeanSDR (c) 2018 <pabr@pabr.org>.
+// See the toplevel README for more information.
+
 #ifndef LEANSDR_FRAMEWORK_H
 #define LEANSDR_FRAMEWORK_H
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <math.h>
+
+#ifndef VERSION
+#define VERSION "undefined"
+#endif
 
 namespace leansdr {
   
