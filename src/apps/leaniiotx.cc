@@ -34,7 +34,7 @@ struct config {
   int nbufs;    // 0 for default
   int bufsize;
   bool verbose, debug;
-  config() : Flo(2449e6), Fm(0), Fs(2.5e6), bufsize(64*1024),
+  config() : Flo(2449e6), Fm(0), Fs(2.5e6), nbufs(0), bufsize(64*1024),
 	     verbose(false), debug(false) { }
 };
 
