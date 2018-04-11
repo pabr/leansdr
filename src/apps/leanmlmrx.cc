@@ -81,7 +81,7 @@ struct config {
   float Fq;        // Quadrature rate (Hz), 0=autoselect
   float maxdev;    // FM maximum deviation (Hz)
   float deemph;    // De-emphasis time constant (s)
-  int N;           // FFT size
+  int N;           // FFT size for channelizer
   int nchans;
   chan chans[MAXCHANS];
   float squelch;   // RMS threshold (0..1, 0 = monitor)
@@ -89,6 +89,8 @@ struct config {
   bool wav;        // Output wav header
   int fd_info;     // FD for aux output, or -1
   float info_rate; // Spectrum estimation rate (Hz)
+  int spec_size;   // FFT size for spectrum display
+  int spec_zoom;   // Spectrum zoom factor
   int fd_control;  // FD for control input, or -1
   
   config()
@@ -97,21 +99,24 @@ struct config {
       N(64), nchans(0), squelch(0),
       Fau(44100),
       wav(false), fd_info(-1), info_rate(1),
+      spec_size(1024), spec_zoom(1),
       fd_control(-1)
   { };
 };
 
 struct spectrum_estimator {
   int size;
+  int zoom;
   fftwf_complex *in, *out;
   fftwf_plan plan;
   float *avgpower;
-  spectrum_estimator(int _size) {
-    size = _size;
+  float smoothbw;
+  spectrum_estimator(int _size)
+    : size(_size), zoom(1), avgpower(NULL), smoothbw(0.5)
+  {
     in  = (fftwf_complex*)fftwf_malloc(sizeof(*in )*size);
     out = (fftwf_complex*)fftwf_malloc(sizeof(*out)*size);
     plan = fftwf_plan_dft_1d(size, in, out, -1, FFTW_ESTIMATE);
-    avgpower = NULL;
   }
   void process(ci16 *buf) {
     for ( int i=0; i<size; ++i ) {
@@ -126,18 +131,29 @@ struct spectrum_estimator {
       avgpower = new float[size];
       memcpy(avgpower, power, sizeof(power));
     }
-    float kavg = 0.5;
     for ( int i=0; i<size; ++i )
-      avgpower[i] = avgpower[i]*(1-kavg) + power[i]*kavg;
+      avgpower[i] = power[i]*smoothbw + avgpower[i]*(1-smoothbw);
   }
   void output(FILE *f) {
-    fprintf(f, "SPECTRUM [");
-    for ( int i=0; i<size; ++i ) {
-      float db = 10 * log10f(avgpower[(size/2+i)&(size-1)]);
-      fprintf(f, "%s%f", (i?",":""), db);
+    if ( zoom == 1 ) {
+      // Use old format for backward compatibility
+      fprintf(f, "SPECTRUM [");
+      for ( int i=0; i<size; ++i ) {
+	float db = 10 * log10f(avgpower[(size/2+i)&(size-1)]);
+	fprintf(f, "%s%.1f", (i?",":""), db);
+      }
+      fprintf(f, "]\n");
+    } else {
+      int s = size / zoom;
+      int pos = size/2 - s/2;
+      fprintf(f, "SPECTRUMRANGE {\"size\":%d,\"pos\":%d,\"db\":[", size, pos);
+      for ( int i=0; i<s; ++i ) {
+	float db = 10 * log10f(avgpower[(size-s/2+i)&(size-1)]);
+	fprintf(f, "%s%.1f", (i?",":""), db);
+      }
+      fprintf(f, "]}\n");
     }
-    fprintf(f, "]\n");
-  }    
+  }
 };
 
 struct runtime {
@@ -202,8 +218,8 @@ struct runtime {
     } else {
       f_info = fdopen(cfg->fd_info, "w");
       if ( ! f_info ) fatal("fdopen(fd_info)");
-      spestim = new spectrum_estimator(1024);
-      fflush(f_info);
+      spestim = new spectrum_estimator(cfg->spec_size);
+      spestim->zoom = cfg->spec_zoom;
     }
     spestim_phase = 0;
     // Setup control input
@@ -799,6 +815,10 @@ int main(int argc, char *argv[]) {
       cfg.fd_info = atoi(argv[++i]);
     else if ( ! strcmp(argv[i],"--info-rate") && i+1<argc )
       cfg.info_rate = atof(argv[++i]);
+    else if ( ! strcmp(argv[i],"--spectrum-size") && i+1<argc )
+      cfg.spec_size = atof(argv[++i]);
+    else if ( ! strcmp(argv[i],"--spectrum-zoom") && i+1<argc )
+      cfg.spec_zoom = atof(argv[++i]);
     else if ( ! strcmp(argv[i],"--fd-control") && i+1<argc )
       cfg.fd_control = atoi(argv[++i]);
     else if ( !strcmp(argv[i], "-h") )
