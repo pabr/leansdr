@@ -1,5 +1,19 @@
-// This file is part of LeanSDR (c) <pabr@pabr.org>.
+// This file is part of LeanSDR Copyright (C) 2018 <pabr@pabr.org>.
 // See the toplevel README for more information.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 
 // leansdrserv interfaces leansdr command pipelines with network sockets.
 
@@ -142,7 +156,8 @@ int run(config &cfg) {
 
   int fd_out1 = 1;  // Default: Forward to stdout
 
-  char buf3[65536];
+  int size_buf3 = 1024*1024;  // For large spectrum dumps
+  char *buf3 = new char[size_buf3];
   int nbuf3 = 0;
   
   int fdmax = 0;
@@ -151,6 +166,8 @@ int run(config &cfg) {
   if ( fd_data1_httpd > fdmax ) fdmax = fd_data1_httpd;
   if ( fd_info3_httpd > fdmax ) fdmax = fd_info3_httpd;
   if ( fd_control4_httpd > fdmax ) fdmax = fd_control4_httpd;
+
+  FILE *prev_socket3 = NULL;
   
   while ( true ) {
     fd_set fds;
@@ -185,7 +202,7 @@ int run(config &cfg) {
     
     if ( intercept3 && FD_ISSET(fd3[0], &fds) ) {
       // Process fd3 from child
-      int nr = read(fd3[0], buf3+nbuf3, sizeof(buf3)-nbuf3);
+      int nr = read(fd3[0], buf3+nbuf3, size_buf3-nbuf3);
       if ( nr < 0 ) fatal("read(fd3)");
       if ( ! nr ) exit(0);
       nbuf3 += nr;
@@ -219,6 +236,7 @@ int run(config &cfg) {
     }
 
     if ( fd_info3_httpd>=0 && FD_ISSET(fd_info3_httpd,&fds) ) {
+      if ( prev_socket3 ) fclose(prev_socket3);
       int fd = accept(fd_info3_httpd, NULL, NULL);
       if ( fd < 0 ) fatal("accept(3)");
       FILE *f = fdopen(fd, "w");
@@ -229,8 +247,10 @@ int run(config &cfg) {
       fprintf(f, "\r\n");
       infobuf.dump(f);
       fflush(f);
-      shutdown(fd, SHUT_RDWR);
-      fclose(f);
+      // Send EOF but keep the socket alive until the next request,
+      // otherwise the peer may get a partial response.
+      shutdown(fd, SHUT_WR);
+      prev_socket3 = f;
     }
 
     if ( fd_control4_httpd>=0 && FD_ISSET(fd_control4_httpd,&fds) ) {
