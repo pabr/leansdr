@@ -590,7 +590,7 @@ namespace leansdr {
   struct sampler_interface {
     virtual complex<T> interp(const complex<T> *pin, float mu, float phase) = 0;
     virtual void update_freq(float freqw) { }  // 65536 = 1 Hz
-    virtual int readahead() { return 0; }
+    virtual int readahead() = 0;
   };
 
 
