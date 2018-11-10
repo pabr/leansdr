@@ -298,6 +298,7 @@ namespace leansdr {
 
   template<int R>
   struct cstln_lut {
+    float amp_max;  // Max amplitude. 1 for PSK, 0 if not applicable.
     complex<signed char> *symbols;
     int nsymbols;
     int nrotations;
@@ -313,6 +314,7 @@ namespace leansdr {
     cstln_lut(predef type, float gamma1=1, float gamma2=1, float gamma3=1) {
       switch ( type ) {
       case BPSK:
+	amp_max = 1;
 	nrotations = 2;
 	nsymbols = 2;
 	symbols = new complex<signed char>[nsymbols];
@@ -326,6 +328,7 @@ namespace leansdr {
 	make_lut_from_symbols();
 	break;
       case QPSK:
+	amp_max = 1;
 	// EN 300 421, section 4.5 Baseband shaping and modulation
 	// EN 302 307, section 5.4.1
 	nrotations = 4;
@@ -338,6 +341,7 @@ namespace leansdr {
 	make_lut_from_symbols();
 	break;
       case PSK8:
+	amp_max = 1;
 	// EN 302 307, section 5.4.2
 	nrotations = 8;
 	nsymbols = 8;
@@ -356,6 +360,7 @@ namespace leansdr {
 	// EN 302 307, section 5.4.3
 	float r1 = sqrtf(4 / (1+3*gamma1*gamma1));
 	float r2 = gamma1 * r1;
+	amp_max = r2;
 	nrotations = 4;
 	nsymbols = 16;
 	symbols = new complex<signed char>[nsymbols];
@@ -383,6 +388,7 @@ namespace leansdr {
 	float r1 = sqrtf(8 / (1+3*gamma1*gamma1+4*gamma2*gamma2));
 	float r2 = gamma1 * r1;
 	float r3 = gamma2 * r1;
+	amp_max = r3;
 	nrotations = 4;
 	nsymbols = 32;
 	symbols = new complex<signed char>[nsymbols];
@@ -428,6 +434,7 @@ namespace leansdr {
 	float r2 = gamma1 * r1;
 	float r3 = gamma2 * r1;
 	float r4 = gamma3 * r1;
+	amp_max = r4;
 	nrotations = 4;
 	nsymbols = 64;
 	symbols = new complex<signed char>[nsymbols];
@@ -451,12 +458,15 @@ namespace leansdr {
 	break;
       }
       case QAM16:
+	amp_max = 0;
 	make_qam(16);
 	break;
       case QAM64:
+	amp_max = 1;
 	make_qam(64);
 	break;
       case QAM256:
+	amp_max = 1;
 	make_qam(256);
 	break;
       default:
