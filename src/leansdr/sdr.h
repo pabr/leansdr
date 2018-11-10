@@ -1344,28 +1344,29 @@ namespace leansdr {
     int phase;
   };  // cnr_fft
 
-  template<typename T>
+  template<typename T, int NFFT>
   struct spectrum : runnable {
-    static const int nfft = 1024;
     spectrum(scheduler *sch, pipebuf< complex<T> > &_in,
-	     pipebuf<float[nfft]> &_out)
+	     pipebuf<float[NFFT]> &_out)
       : runnable(sch, "spectrum"),
 	decimation(1048576), kavg(0.1),
+	decim(1),
 	in(_in), out(_out),
-	fft(nfft), avgpower(NULL), phase(0) {
+	fft(NFFT), avgpower(NULL), phase(0) {
     }
 
     int decimation;
     float kavg;
+    int decim;
 
     void run() {
-      while ( in.readable()>=fft.n && out.writable()>=1 ) {
-	phase += fft.n;
+      while ( in.readable()>=fft.n*decim && out.writable()>=1 ) {
+	phase += fft.n*decim;
 	if ( phase >= decimation ) {
 	  phase -= decimation;
 	  do_spectrum();
 	}
-	in.read(fft.n);
+	in.read(fft.n*decim);
       }
     }
 
@@ -1373,9 +1374,14 @@ namespace leansdr {
 
     void do_spectrum() {
       complex<T> data[fft.n];
-      memcpy(data, in.rd(), fft.n*sizeof(data[0]));
+      if ( decim == 1 ) {
+	memcpy(data, in.rd(), fft.n*sizeof(data[0]));
+      } else {
+	complex<T> *pin = in.rd();
+	for ( int i=0; i<fft.n; ++i,pin+=decim ) data[i] = *pin;
+      }
       fft.inplace(data, true);
-      float power[nfft];
+      float power[NFFT];
       for ( int i=0; i<fft.n; ++i )
 	power[i] = (float)data[i].re*data[i].re + (float)data[i].im*data[i].im;
       if ( ! avgpower ) {
@@ -1389,15 +1395,15 @@ namespace leansdr {
 
       // Reuse power[]
       for ( int i=0; i<fft.n/2; ++i ) {
-	power[i] = 10 * log10f(avgpower[nfft/2+i]);
-	power[nfft/2+i] = 10 * log10f(avgpower[i]);
+	power[i] = 10 * log10f(avgpower[NFFT/2+i]);
+	power[NFFT/2+i] = 10 * log10f(avgpower[i]);
       }
-      memcpy(out.wr(), power, sizeof(power[0])*nfft);
+      memcpy(out.wr(), power, sizeof(power[0])*NFFT);
       out.written(1);
     }
 
     pipereader< complex<T> > in;
-    pipewriter< float[nfft] > out;
+    pipewriter< float[NFFT] > out;
     cfft_engine<T> fft;
     T *avgpower;
     int phase;
