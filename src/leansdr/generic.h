@@ -49,12 +49,14 @@ struct file_reader : runnable {
 
   again:
     ssize_t nr = read(fdin, out.wr(), size);
-    if ( nr<0 && errno==EWOULDBLOCK && filler ) {
-      if ( sch->debug ) fprintf(stderr, "U");
-      out.write(*filler);
+    if ( nr<0 && errno==EWOULDBLOCK ) {
+      if ( filler ) {
+	if ( sch->debug ) fprintf(stderr, "U");
+	out.write(*filler);
+      }
       return;
     }
-    if ( nr < 0 ) fatal("read");
+    if ( nr < 0 ) fatal("read(file_reader)");
     if ( ! nr ) {
       if ( ! loop ) return;
       if ( sch->debug ) fprintf(stderr, "%s looping\n", name);
