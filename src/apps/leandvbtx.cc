@@ -55,7 +55,7 @@ private:
 };
 
 struct config {
-  cstln_lut<256>::predef constellation;
+  cstln_predef constellation;
   code_rate fec;
   float amp;       // Desired RMS constellation amplitude
   bool agc;
@@ -67,7 +67,7 @@ struct config {
   bool fill;
   bool verbose, debug;
   config()
-    : constellation(cstln_lut<256>::QPSK), fec(FEC12),
+    : constellation(QPSK), fec(FEC12),
       amp(1.0), agc(false),
       interp(2), decim(1), rolloff(0.35), rrc_rej(10),
       output_format(OUTPUT_F32),
@@ -109,7 +109,8 @@ void run(config &cfg) {
 
   // CONVOLUTIONAL CODER
 
-  cstln_lut<256> *cstln = make_dvbs2_constellation(cfg.constellation, cfg.fec);
+  cstln_lut<hard_ss,256> *cstln =
+    make_dvbs2_constellation<hard_ss>(cfg.constellation, cfg.fec);
   int bits_per_symbol = log2i(cstln->nsymbols);
 
   if ( cfg.fec==FEC23 && (cstln->nsymbols==4 ||
@@ -255,25 +256,14 @@ int main(int argc, char *argv[]) {
     }
     else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
       ++i;
-      if      ( ! strcmp(argv[i], "BPSK" ) )
-	cfg.constellation = cstln_lut<256>::BPSK;
-      else if ( ! strcmp(argv[i], "QPSK" ) )
-	cfg.constellation = cstln_lut<256>::QPSK;
-      else if ( ! strcmp(argv[i], "8PSK" ) )
-	cfg.constellation = cstln_lut<256>::PSK8;
-      else if ( ! strcmp(argv[i], "16APSK" ) )
-	cfg.constellation = cstln_lut<256>::APSK16;
-      else if ( ! strcmp(argv[i], "32APSK" ) )
-	cfg.constellation = cstln_lut<256>::APSK32;
-      else if ( ! strcmp(argv[i], "64APSKe" ) )
-	cfg.constellation = cstln_lut<256>::APSK64E;
-      else if ( ! strcmp(argv[i], "16QAM" ) )
-	cfg.constellation = cstln_lut<256>::QAM16;
-      else if ( ! strcmp(argv[i], "64QAM" ) )
-	cfg.constellation = cstln_lut<256>::QAM64;
-      else if ( ! strcmp(argv[i], "256QAM" ) )
-	cfg.constellation = cstln_lut<256>::QAM256;
-      else usage(argv[0], stderr, 1, argv[i]);
+      int c;
+      for ( c=0; c<cstln_predef::COUNT; ++c )
+	if ( ! strcmp(argv[i], cstln_names[c]) ) {
+	  cfg.constellation = (cstln_predef)c;
+	  break;
+	}
+      if ( c == cstln_predef::COUNT )
+	usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "-f") && i+1<argc ) {
       ++i;
