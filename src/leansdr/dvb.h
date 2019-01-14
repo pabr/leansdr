@@ -1,4 +1,4 @@
-// This file is part of LeanSDR Copyright (C) 2016-2018 <pabr@pabr.org>.
+// This file is part of LeanSDR Copyright (C) 2016-2019 <pabr@pabr.org>.
 // See the toplevel README for more information.
 //
 // This program is free software: you can redistribute it and/or modify
@@ -37,16 +37,18 @@ namespace leansdr {
   enum code_rate {
     FEC12, FEC23, FEC46, FEC34, FEC56, FEC78,  // DVB-S
     FEC45, FEC89, FEC910,                      // DVB-S2
+    FEC14, FEC13, FEC25, FEC35,                // DVB-S2
     FEC_MAX
   };
 
   // Customize APSK radii according to code rate
 
-  cstln_lut<256> * make_dvbs2_constellation(cstln_lut<256>::predef c,
-					    code_rate r) {
+  template<typename SOFTSYMB>
+  cstln_lut<SOFTSYMB,256> * make_dvbs2_constellation(cstln_predef c,
+						     code_rate r) {
     float gamma1=1, gamma2=1, gamma3=1;
     switch ( c ) {
-    case cstln_lut<256>::APSK16:
+    case APSK16:
       // EN 302 307, section 5.4.3, Table 9
       switch ( r ) {
       case FEC23:
@@ -59,7 +61,7 @@ namespace leansdr {
       default: fail("Code rate not supported with APSK16");
       }
       break;
-    case cstln_lut<256>::APSK32:
+    case APSK32:
       // EN 302 307, section 5.4.4, Table 10
       switch ( r ) {
       case FEC34:  gamma1 = 2.84; gamma2 = 5.27; break;
@@ -70,14 +72,14 @@ namespace leansdr {
       default: fail("Code rate not supported with APSK32");
       }
       break;
-    case cstln_lut<256>::APSK64E:
+    case APSK64E:
       // EN 302 307-2, section 5.4.5, Table 13f
       gamma1 = 2.4; gamma2 = 4.3; gamma3 = 7;
       break;
     default:
       break;
     }
-    return new cstln_lut<256>(c, gamma1, gamma2, gamma3);
+    return new cstln_lut<SOFTSYMB,256>(c, gamma1, gamma2, gamma3);
   }
 
   // EN 300 421, section 4.4.3, table 2 Punctured code, G1=0171, G2=0133
@@ -122,7 +124,7 @@ namespace leansdr {
   template<typename Tbyte, Tbyte BYTE_ERASED>
   struct deconvol_sync : runnable {
     deconvol_sync(scheduler *sch,
-		  pipebuf<softsymbol> &_in,
+		  pipebuf<eucl_ss> &_in,
 		  pipebuf<Tbyte> &_out,
 		  uint32_t gX, uint32_t gY,
 		  uint32_t pX, uint32_t pY)
@@ -366,11 +368,11 @@ namespace leansdr {
     // 5/6 24 symbols -> 5 bytes
     // 7/8 32 symbols -> 7 bytes
 
-    inline Tbyte readbyte(sync_t *s, softsymbol *&p) {
+    inline Tbyte readbyte(sync_t *s, eucl_ss *&p) {
       while ( s->n_out < 8 ) {
 	iq_t iq = s->in;
 	while ( s->n_in < traceback ) {
-	  u8 iqbits = s->lut[(p->symbol&2)?1:0][p->symbol&1];
+	  u8 iqbits = s->lut[(p->nearest&2)?1:0][p->nearest&1];
 	  ++p;
 	  iq = (iq<<2) | iqbits;
 	  s->n_in += 2;
@@ -388,12 +390,12 @@ namespace leansdr {
       return res;
     }
 
-    inline unsigned long readerrors(sync_t *s, softsymbol *&p) {
+    inline unsigned long readerrors(sync_t *s, eucl_ss *&p) {
       unsigned long res = 0;
       while ( s->n_out2 < 8 ) {
 	iq_t iq = s->in2;
 	while ( s->n_in2 < traceback ) {
-	  u8 iqbits = s->lut[(p->symbol&2)?1:0][p->symbol&1];
+	  u8 iqbits = s->lut[(p->nearest&2)?1:0][p->nearest&1];
 	  ++p;
 	  iq = (iq<<2) | iqbits;
 	  s->n_in2 += 2;
@@ -430,7 +432,7 @@ namespace leansdr {
 	unsigned long errors_best = 1 << 30;
 	sync_t *best = &syncs[0];
 	for ( sync_t *s=syncs; s<syncs+NSYNCS; ++s ) {
-	  softsymbol *pin = in.rd();
+	  eucl_ss *pin = in.rd();
 	  unsigned long errors = 0;
 	  for ( int c=n; c--; )
 	    errors += readerrors(s, pin);
@@ -453,7 +455,7 @@ namespace leansdr {
 	}
       }
 
-      softsymbol *pin=in.rd(), *pin0=pin;
+      eucl_ss *pin=in.rd(), *pin0=pin;
       Tbyte *pout=out.wr(), *pout0=pout;
       while ( n-- )
 	*pout++ = readbyte(locked, pin);
@@ -461,7 +463,7 @@ namespace leansdr {
       out.written(pout-pout0);
     }    
 
-    pipereader<softsymbol> in;
+    pipereader<eucl_ss> in;
     pipewriter<Tbyte> out;
     // DECONVOL
     int nG;
@@ -478,7 +480,7 @@ namespace leansdr {
   typedef deconvol_sync<u8,0> deconvol_sync_simple;
 
   deconvol_sync_simple *make_deconvol_sync_simple(scheduler *sch,
-						  pipebuf<softsymbol> &_in,
+						  pipebuf<eucl_ss> &_in,
 						  pipebuf<u8> &_out,
 						  enum code_rate rate) {
     // EN 300 421, section 4.4.3 Inner coding
@@ -703,7 +705,7 @@ namespace leansdr {
   };  // dvb_deconvol_sync
 
 
-  typedef dvb_deconvol_sync<softsymbol> dvb_deconvol_sync_soft;
+  typedef dvb_deconvol_sync<eucl_ss> dvb_deconvol_sync_soft;
   typedef dvb_deconvol_sync<u8> dvb_deconvol_sync_hard;
 
 
@@ -1206,15 +1208,15 @@ namespace leansdr {
     typedef trellis<TS,64, TUS,32, 64> trellis_56;
     typedef viterbi_dec<TS,64, TUS,32, TCS,64, TBM, TPM, path_56> dvb_dec_56;
 
-    // QPSK 7/8: 6 bits of state, 7 bits in, 8 bits out
+    // 7/8: 6 bits of state, 7 bits in, 8 bits out
     typedef bitpath<uint64_t,TUS,7,9> path_78;
     typedef trellis<TS,64, TUS,128, 256> trellis_78;
     typedef viterbi_dec<TS,64, TUS,128, TCS,256, TBM, TPM, path_78> dvb_dec_78;
 
   private:
-    pipereader<softsymbol> in;
+    pipereader<eucl_ss> in;
     pipewriter<unsigned char> out;
-    cstln_lut<256> *cstln;
+    cstln_lut<eucl_ss,256> *cstln;
     fec_spec *fec;
     int bits_per_symbol;     // Bits per IQ symbol (not per coded symbol)
     int nsyncs;
@@ -1231,8 +1233,8 @@ namespace leansdr {
     int resync_period;
 
     viterbi_sync(scheduler *sch,
-		 pipebuf<softsymbol> &_in, pipebuf<unsigned char> &_out,
-		 cstln_lut<256> *_cstln, code_rate cr)
+		 pipebuf<eucl_ss> &_in, pipebuf<unsigned char> &_out,
+		 cstln_lut<eucl_ss,256> *_cstln, code_rate cr)
       : runnable(sch, "viterbi_sync"),
 	in(_in), out(_out, chunk_size),
 	cstln(_cstln),
@@ -1344,20 +1346,20 @@ namespace leansdr {
 	if ( conj ) Q = -Q;
 	int8_t RI = I*ca - Q*sa;
 	int8_t RQ = I*sa + Q*ca;
-	cstln_lut<256>::result *pr = cstln->lookup(RI, RQ);
-	map[i] = pr->ss.symbol;
+	cstln_lut<eucl_ss,256>::result *pr = cstln->lookup(RI, RQ);
+	map[i] = pr->ss.nearest;
       }
       return map;
     }
 
-    inline TUS update_sync(int s, softsymbol *pin, TPM *discr) {
+    inline TUS update_sync(int s, eucl_ss *pin, TPM *discr) {
       // Read one FEC ouput block
       pin += syncs[s].shift;
       TCS cs = 0;
       TBM cost = 0;
       for ( int i=0; i<nshifts; ++i,++pin )  {
-	cs = (cs<<bits_per_symbol) | syncs[s].map[pin->symbol];
-	cost += pin->cost;
+	cs = (cs<<bits_per_symbol) | syncs[s].map[pin->nearest];
+	cost -= pin->discr2;
       }
       return syncs[s].dec->update(cs, cost, discr);
     }
@@ -1376,7 +1378,7 @@ namespace leansdr {
 
 	uint64_t outstream = 0;
 	int nout = 0;
-	softsymbol *pin = in.rd();
+	eucl_ss *pin = in.rd();
 	for ( int blocknum=0; blocknum<chunk_size; ++blocknum,pin+=nshifts ) {
 	  TPM discr;
 	  TUS result = update_sync(current_sync, pin, &discr);
@@ -1414,8 +1416,6 @@ namespace leansdr {
     }
 
   };  // viterbi_sync
-
-
 
 }  // namespace
 
