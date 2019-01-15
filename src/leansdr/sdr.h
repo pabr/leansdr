@@ -284,7 +284,7 @@ namespace leansdr {
   // R must be a power of 2.
   // Up to 256 symbols.
   
-  struct softsymbol {
+  struct softsymbol {  // TBD obsolete
     int16_t cost;  // For Viterbi with TBM=int16_t
     uint8_t symbol;
   };
@@ -302,15 +302,21 @@ namespace leansdr {
   //   softsymb_to_dump(const SOFTSYMB &ss)               To grey 0..255
   // For LUT initialization only.  Performance is not critical.
 
+  // A struct that temporarily holds all the info we precompute for the LUT.
+  struct full_ss {
+    uint8_t nearest;       // Index of nearest in constellation
+    uint16_t dists2[256];  // Squared distances
+    float p[8];            // 0..1 probability of bits being 1
+  };
+
   // Hard decision soft-symbols.
   // Value is the symbol index, 0..255.
   typedef uint8_t hard_ss;
-  void to_softsymb(uint8_t nearest, float dists2[256], const float p[8],
-		   hard_ss *ss) {
-    *ss = nearest;
+  void to_softsymb(const full_ss *fss, hard_ss *ss) {
+    *ss = fss->nearest;
   }
   void softsymb_harden(hard_ss *ss) {
-    // Nop
+    // NOP
   }
   uint8_t softsymb_to_dump(const hard_ss &ss, int bit) {
     return ((ss>>bit)&1) ? 255 : 0;
@@ -325,17 +331,16 @@ namespace leansdr {
     uint16_t discr2;  // 2nd_nearest - nearest
     uint8_t nearest;
   };
-  void to_softsymb(uint8_t nearest, float dists2[256], const float p[8],
-		   eucl_ss *ss) {
+  void to_softsymb(const full_ss *fss, eucl_ss *ss) {
     for ( int s=0; s<ss->MAX_SYMBOLS; ++s )
-      ss->dists2[s] = dists2[s];
+      ss->dists2[s] = fss->dists2[s];
     uint16_t best=65535, best2=65535;
     for ( int s=0; s<ss->MAX_SYMBOLS; ++s ) {
-      if      ( dists2[s] < best )  { best2=best; best=dists2[s]; }
-      else if ( dists2[s] < best2 ) { best2=dists2[s]; }
+      if      ( fss->dists2[s] < best )  { best2=best; best=fss->dists2[s]; }
+      else if ( fss->dists2[s] < best2 ) { best2=fss->dists2[s]; }
     }
     ss->discr2 = best2 - best;
-    ss->nearest = nearest;
+    ss->nearest = fss->nearest;
   }
   void softsymb_harden(eucl_ss *ss) {
     for ( int s=0; s<ss->MAX_SYMBOLS; ++s )
@@ -351,11 +356,10 @@ namespace leansdr {
   struct llr_ss {
     llr_t bits[8];  // Up to 8 bit considered independent
   };
-  void to_softsymb(uint8_t nearest, float dists2[256], const float p[8],
-		   llr_ss *ss) {
+  void to_softsymb(const full_ss *fss, llr_ss *ss) {
     for ( int b=0; b<8; ++b ) {
       // TBD Apply actual LLR law
-      int r = -127 + 254*p[b];
+      int r = -127 + 254*fss->p[b];
       if ( r < -127 ) r = -127;
       if ( r > 127 ) r = 127;
       ss->bits[b] = r;
@@ -629,17 +633,17 @@ namespace leansdr {
       float mer = 12.0;  // TBD Make a-priori SNR configurable
       fprintf(stderr, "Decision optimized for MER %.1f dB\n", mer);
       float sigma = cstln_amp * exp10f(-mer/20);
-      // Squared distances.
-      // -1 marks end if nsymbols<256; no need to refill for each (I,Q).
-      float dists2[256];
-      for ( int s=0; s<256; ++s ) dists2[s] = -1;
+
+      // Precomputed values.
+      // Shared scope so that we don't have to reset dists2[nsymbols..] to -1.
+      struct full_ss fss;
+      for ( int s=0; s<256; ++s ) fss.dists2[s] = -1;
 
       for ( int I=-R/2; I<R/2; ++I )
 	for ( int Q=-R/2; Q<R/2; ++Q ) {
-	  // Compute all metrics and let to_softsymb() pick what it needs
-	  // (overloading on SOFTSYMB).
 	  // Nearest symbol
-	  uint8_t nearest = 0;
+	  fss.nearest = 0;
+	  fss.dists2[0] = 65535;
 	  // Conditional probabilities:
 	  // Sum likelyhoods from all candidate symbols.
 	  //
@@ -653,24 +657,24 @@ namespace leansdr {
 	  for ( int s=0; s<nsymbols; ++s ) {
 	    float d2 = ( (I-symbols[s].re)*(I-symbols[s].re) +
 			 (Q-symbols[s].im)*(Q-symbols[s].im) );
-	    if ( d2 < dists2[nearest] ) nearest = s;
-	    dists2[s] = d2;
+	    if ( d2 < fss.dists2[fss.nearest] ) fss.nearest = s;
+	    fss.dists2[s] = d2;
 	    float p = expf(-d2/(2*sigma*sigma)) / (sqrtf(2*M_PI)*sigma);
 	    for ( int bit=0; bit<8; ++bit ) {
 	      probs[bit][(s>>bit)&1] += p;
 	    }
 	  }
 	  // Normalize
-	  float prob1[8];
 	  for ( int b=0; b<8; ++b ) {
 	    float p = probs[b][1] / (probs[b][0]+probs[b][1]);
 	    // Avoid trouble when sigma is unrealistically low.
 	    if ( ! isnormal(p) ) p = 0;
-	    prob1[b] = p;
+	    fss.p[b] = p;
 	  }
 	  result *pr = &lut[I&(R-1)][Q&(R-1)];
-	  to_softsymb(nearest, dists2, prob1, &pr->ss);
-	  pr->symbol = nearest;
+	  to_softsymb(&fss, &pr->ss);
+	  // Always record nearest symbol and phase error for C&T.
+	  pr->symbol = fss.nearest;
 	  float ph_symbol = atan2f(symbols[pr->symbol].im,
 				   symbols[pr->symbol].re);
 	  float ph_err = atan2f(Q,I) - ph_symbol;
