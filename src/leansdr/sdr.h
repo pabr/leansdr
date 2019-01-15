@@ -296,18 +296,19 @@ namespace leansdr {
   //const float cstln_amp = 75;  // Best for BPSK at 45°
   const float cstln_amp = 75;  // Trade-off
 
-  // Options for soft-symbols.
-  // The following functions are overloaded to keep cstln_lut<SOFTSYMB> generic:
-  //   softsymb(uint8_t nearest, float d2, const float p[8], SOFTSYMB *ss)
-  //   softsymb_to_dump(const SOFTSYMB &ss)               To grey 0..255
-  // For LUT initialization only.  Performance is not critical.
-
   // A struct that temporarily holds all the info we precompute for the LUT.
   struct full_ss {
     uint8_t nearest;       // Index of nearest in constellation
     uint16_t dists2[256];  // Squared distances
     float p[8];            // 0..1 probability of bits being 1
   };
+
+  // Options for soft-symbols.
+  // These functions are overloaded to keep cstln_lut<SOFTSYMB> generic:
+  //   to_softsymb(const full_ss *fss, SOFTSYMB *ss)
+  //   softsymb_harden(SOFTSYMB *ss) {
+  //   softsymb_to_dump(const SOFTSYMB &ss, int bit)     To grey 0..255
+  // For LUT initialization only.  Performance is not critical.
 
   // Hard decision soft-symbols.
   // Value is the symbol index, 0..255.
