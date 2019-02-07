@@ -30,6 +30,12 @@ namespace leansdr {
     complex(T x) : re(x), im(0) { }
     complex(T x, T y) : re(x), im(y) { }
     inline void operator +=(const complex<T> &x) { re+=x.re; im+=x.im; }
+    inline void operator *=(const complex<T> &c) {
+      T tre = re*c.re - im*c.im;
+      im = re*c.im + im*c.re;
+      re = tre;
+    }
+    inline void operator *=(const T &k) { re*=k; im*=k; }
   };
 
   template<typename T>
@@ -51,7 +57,41 @@ namespace leansdr {
   complex<T> operator *(const T &k, const complex<T> &a) {
     return complex<T>(k*a.re, k*a.im);
   }
-  
+
+  template<typename T>
+  T dotprod(const T *u, const T *v, int n) {
+    T acc = 0;
+    while ( n-- ) acc += (*u++) * (*v++);
+    return acc;
+  }
+
+  template<typename T>
+  inline T cnorm2(const complex<T> &u) {
+    return u.re*u.re + u.im*u.im;
+  }
+
+  template<typename T>
+  T cnorm2(const complex<T> *p, int n) {
+    T res = 0;
+    for ( ; n--; ++p ) res += cnorm2(*p);
+    return res;
+  }
+
+  // Return conj(u)*v
+  template<typename T>
+  inline complex<T> conjprod(const complex<T> &u, const complex<T> &v) {
+    return complex<T>(u.re*v.re + u.im*v.im,
+		      u.re*v.im - u.im*v.re);
+  }
+
+  // Return sum(conj(u[i])*v[i])
+  template<typename T>
+  complex<T> conjprod(const complex<T> *u, const complex<T> *v, int n) {
+    complex<T> acc = 0;
+    while ( n-- ) acc += conjprod(*u++, *v++);
+    return acc;
+  }
+
   // TBD Optimize with dedicated instructions
   int hamming_weight(uint8_t x) {
     static const int lut[16] = { 0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4 };
