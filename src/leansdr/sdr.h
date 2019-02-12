@@ -352,15 +352,19 @@ namespace leansdr {
   }
 
   // Log-Likelihood Ratios soft-symbols
-  // (work in progress)
-  typedef int8_t llr_t;  // -127=100%0, +127=100%1
+  typedef int8_t llr_t;  // log(p(0)/p(1)), clip -127=1 +127=0
+  inline bool llr_harden(llr_t v) { return v & 128; }
   struct llr_ss {
     llr_t bits[8];  // Up to 8 bit considered independent
   };
   void to_softsymb(const full_ss *fss, llr_ss *ss) {
     for ( int b=0; b<8; ++b ) {
-      // TBD Apply actual LLR law
-      int r = -127 + 254*fss->p[b];
+#if 1  // TBD Linear works better ?
+      int r = 127 - 254*fss->p[b];
+#else
+      float v = (1.0f-fss->p[b])/(fss->p[b]+1e-6);
+      int r = logf(v) * 32;
+#endif
       if ( r < -127 ) r = -127;
       if ( r > 127 ) r = 127;
       ss->bits[b] = r;
@@ -371,7 +375,7 @@ namespace leansdr {
       ss->bits[b] = (ss->bits[b]<0) ? -127 : 127;
   }
   uint8_t softsymb_to_dump(const llr_ss &ss, int bit) {
-    return 128 + ss.bits[bit];
+    return 128 - ss.bits[bit];
   }
 
   enum cstln_predef {
@@ -631,6 +635,7 @@ namespace leansdr {
     }
     result lut[R][R];
     void make_lut_from_symbols() {
+      // Note: Excessively low values will break 16APSK and 32APSK.
       float mer = 12.0;  // TBD Make a-priori SNR configurable
       fprintf(stderr, "Decision optimized for MER %.1f dB\n", mer);
       float sigma = cstln_amp * exp10f(-mer/20);
@@ -684,18 +689,21 @@ namespace leansdr {
     }
 
   public:
-    void dump(FILE *f, int bit) {
-      fprintf(f, "P5\n%d %d\n255\n", R, R);
-      for ( int Q=R/2-1; Q>=-R/2; --Q )
-	for ( int I=-R/2; I<R/2; ++I ) {
-	  result *pr = &lut[I&(R-1)][Q&(R-1)];
-	  uint8_t v = softsymb_to_dump(pr->ss, bit);
-	  // Highlight the constellation symbols.
-	  for ( int s=0; s<nsymbols; ++s ) {
-	    if ( symbols[s].re==I && symbols[s].im==Q ) v ^= 128;
+    void dump(FILE *f) {
+      int bps = log2(nsymbols);
+      fprintf(f, "P5\n%d %d\n255\n", R, R*bps);
+      for ( int bit=0; bit<bps; ++bit ) {
+	for ( int Q=R/2-1; Q>=-R/2; --Q )
+	  for ( int I=-R/2; I<R/2; ++I ) {
+	    result *pr = &lut[I&(R-1)][Q&(R-1)];
+	    uint8_t v = softsymb_to_dump(pr->ss, bit);
+	    // Highlight the constellation symbols.
+	    for ( int s=0; s<nsymbols; ++s ) {
+	      if ( symbols[s].re==I && symbols[s].im==Q ) v ^= 128;
+	    }
+	    fputc(v, f);
 	  }
-	  fputc(v, f);
-	}
+      }
     }
     // Convert soft metric to Hamming distance
     void harden() {
