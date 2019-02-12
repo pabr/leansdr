@@ -239,17 +239,17 @@ namespace leansdr {
     float out_rms;    // Desired RMS output power
     float bw;         // Bandwidth
     float estimated;  // Input power
+    static const int chunk_size = 128;
     simple_agc(scheduler *sch,
 	       pipebuf< complex<T> > &_in,
 	       pipebuf< complex<T> > &_out)
       : runnable(sch, "AGC"),
 	out_rms(1), bw(0.001), estimated(0),
-	in(_in), out(_out) {
+	in(_in), out(_out, chunk_size) {
     }
   private:
     pipereader< complex<T> > in;
     pipewriter< complex<T> > out;
-    static const int chunk_size = 128;
     void run() {
       while ( in.readable() >= chunk_size &&
 	      out.writable() >= chunk_size ) {
