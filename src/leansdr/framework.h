@@ -217,8 +217,8 @@ namespace leansdr {
   // Convenience functions for working with optional pipes
 
   template<typename T>
-  pipewriter<T> *opt_writer(pipebuf<T> *buf) {
-    return buf ? new pipewriter<T>(*buf) : NULL;
+  pipewriter<T> *opt_writer(pipebuf<T> *buf, unsigned long min_write=1) {
+    return buf ? new pipewriter<T>(*buf, min_write) : NULL;
   }
 
   template<typename T>
