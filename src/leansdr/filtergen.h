@@ -39,6 +39,13 @@ namespace leansdr {
       for ( int i=0; i<n; ++i ) coeffs[i] = coeffs[i] * gain;
     }
 
+    template<typename T>
+    void cancel_dcgain(int n, T *coeffs) {
+      float s = 0;
+      for ( int i=0; i<n; ++i ) s = s + coeffs[i];
+      for ( int i=0; i<n; ++i ) coeffs[i] -= s/n;
+    }
+
     // Generate coefficients for a sinc filter.
     // https://en.wikipedia.org/wiki/Sinc_filter
 
