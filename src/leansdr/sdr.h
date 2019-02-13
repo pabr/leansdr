@@ -399,14 +399,15 @@ namespace leansdr {
     [QAM256]  = "256QAM"
   };
 
-
-  template<typename SOFTSYMB, int R>
-  struct cstln_lut {
+  struct cstln_base {
     float amp_max;  // Max amplitude. 1 for PSK, 0 if not applicable.
-    complex<signed char> *symbols;
+    complex<int8_t> *symbols;
     int nsymbols;
     int nrotations;
+  };  // cstln_base
 
+  template<typename SOFTSYMB, int R>
+  struct cstln_lut : cstln_base {
     cstln_lut(cstln_predef type,
 	      float gamma1=1, float gamma2=1, float gamma3=1) {
       switch ( type ) {
