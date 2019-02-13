@@ -156,7 +156,7 @@ namespace leansdr {
     T xymin, xymax;
     unsigned long decimation;
     unsigned long pixels_per_frame;
-    cstln_lut<256> **cstln;  // Optional ptr to optional constellation
+    cstln_base **cstln;  // Optional ptr to optional constellation
     cscope(scheduler *sch, pipebuf< complex<T> > &_in, T _xymin, T _xymax,
 	   const char *_name=NULL)
       : runnable(sch, _name?_name:_in.name),
@@ -210,13 +210,15 @@ namespace leansdr {
   struct wavescope : runnable {
     T ymin, ymax;
     unsigned long decimation;
+    float hgrid;
     wavescope(scheduler *sch, pipebuf<T> &_in,
 	      T _ymin, T _ymax, const char *_name=NULL)
       : runnable(sch, _name?_name:_in.name),
-	in(_in), ymin(_ymin), ymax(_ymax),
-	decimation(DEFAULT_GUI_DECIMATION),
-	g(sch, name), phase(0),
-	x(0) {
+	ymin(_ymin), ymax(_ymax),
+	decimation(DEFAULT_GUI_DECIMATION), hgrid(0),
+	in(_in),
+	phase(0), g(sch, name), x(0)
+    {
       g.clear();
     }	
     void run() {
@@ -229,6 +231,12 @@ namespace leansdr {
     void plot(T *p, int count) {
       T *pend = p + count;
       g.clear();
+      g.setfg(128, 128, 0);
+      g.line(0,g.h/2, g.w-1,g.h/2);
+      if ( hgrid ) {
+	for ( float x=0; x<g.w; x+=hgrid )
+	  g.line(x,0, x,g.h-1);
+      }
       g.setfg(0, 255, 0);
       for ( int x=0; p<pend; ++x,++p ) {
 	T v = *p;
@@ -281,74 +289,89 @@ namespace leansdr {
       }
       g.clear();
     }
+
     void run() {
-      // Read up to one pixel worth of data
+      // Asynchronous channels: Read all available data
+      for ( channel *c=chans; c<chans+nchans; ++c ) {
+	if ( c->spec.flags & chanspec::ASYNC )
+	  run_channel(c, c->in->readable());
+      }
+      // Synchronous channels: Read up to one pixel worth of data
+      // between display syncs.
       unsigned long count = samples_per_pixel;
       for ( channel *c=chans; c<chans+nchans; ++c )
 	if ( ! (c->spec.flags&chanspec::ASYNC) )
 	  count = min(count, c->in->readable());
       for ( int n=count; n--; ) {
-	for ( channel *c=chans; c<chans+nchans; ++c ) {
-	  int nr;
-	  if ( c->spec.flags & chanspec::ASYNC )
-	    // For async channels, read any and all available data.
-	    nr = c->in->readable();
-	  else
-	    nr = 1;
-	  g.setfg(c->spec.rgb[0], c->spec.rgb[1], c->spec.rgb[2]);
-	  int y = -1;
-	  while ( nr-- ) {
-	    float v = *c->in->rd() * c->spec.scale;
-	    if ( c->spec.flags & chanspec::COUNT )
-	      ++c->accum;
-	    else if ( c->spec.flags & chanspec::SUM )
-	      c->accum += v;
-	    else {
-	      c->print_val = v;
-	      float nv = (v-c->spec.ymin) / (c->spec.ymax-c->spec.ymin);
-	      if ( c->spec.flags & chanspec::WRAP )
-		nv = nv - floor(nv);
-	      y = g.h - g.h*nv;
-	    }
-	    c->in->read(1);
-	  }
-	  // Display count/sum channels only when the cursor is about to move.
-	  if ( (c->spec.flags&(chanspec::COUNT|chanspec::SUM)) &&
-	       t+1 >= samples_per_pixel ) {
-	    T v = c->accum;
-	    y = g.h-1 - g.h*(v-c->spec.ymin)/(c->spec.ymax-c->spec.ymin);
-	    c->accum = 0;
-	    c->print_val = v;
-	  } 
-	  if ( y >= 0 ) {
-	    if ( c->spec.flags & chanspec::LINE ) {
-	      if ( x ) g.line(x-1, c->prev_y, x, y);
-	      c->prev_y = y;
-	    } else
-	      g.point(x, y);
-	  }
-	}
-	g.show();
-	// Print instantatenous values as text
-	for ( int i=0; i<nchans; ++i ) {
-	  channel *c = &chans[i];
-	  g.setfg(c->spec.rgb[0], c->spec.rgb[1], c->spec.rgb[2]);
-	  char text[256];
-	  sprintf(text, c->spec.format, c->print_val);
-	  g.transient_text(5, 20+16*i, text);
-	}
-	run_gui();
-	if ( ++t >= samples_per_pixel ) {
-	  t = 0;
-	  ++x;
-	  if ( x >= g.w ) x = 0;
-	  g.setfg(0, 0, 0);
-	  g.line(x, 0, x, g.h-1);
-	}
-	run_gui();
-	g.sync();
+	for ( channel *c=chans; c<chans+nchans; ++c )
+	  if ( ! (c->spec.flags&chanspec::ASYNC) )
+	    run_channel(c, 1);
       }
+      t += count;
+      g.show();
+      // Print instantatenous values as text
+      for ( int i=0; i<nchans; ++i ) {
+	channel *c = &chans[i];
+	g.setfg(c->spec.rgb[0], c->spec.rgb[1], c->spec.rgb[2]);
+	char text[256];
+	sprintf(text, c->spec.format, c->print_val);
+	g.transient_text(5, 20+16*i, text);
+      }
+      run_gui();
+      if ( t >= samples_per_pixel ) {
+	t = 0;
+	++x;
+	if ( x >= g.w ) x = 0;
+	g.setfg(0, 0, 0);
+	g.line(x, 0, x, g.h-1);
+      }
+      run_gui();
+      g.sync();
       total_samples += count;
+    }
+
+  private:
+    int nchans;
+    struct channel {
+      chanspec spec;
+      pipereader<T> *in;
+      float accum;
+      int prev_y;
+      float print_val;
+    } *chans;
+    void run_channel(channel *c, int nr) {
+      g.setfg(c->spec.rgb[0], c->spec.rgb[1], c->spec.rgb[2]);
+      int y = -1;
+      while ( nr-- ) {
+	float v = *c->in->rd() * c->spec.scale;
+	if ( c->spec.flags & chanspec::COUNT )
+	  ++c->accum;
+	else if ( c->spec.flags & chanspec::SUM )
+	  c->accum += v;
+	else {
+	  c->print_val = v;
+	  float nv = (v-c->spec.ymin) / (c->spec.ymax-c->spec.ymin);
+	  if ( c->spec.flags & chanspec::WRAP )
+	    nv = nv - floor(nv);
+	  y = g.h - g.h*nv;
+	}
+	c->in->read(1);
+      }
+      // Display count/sum channels only when the cursor is about to move.
+      if ( (c->spec.flags&(chanspec::COUNT|chanspec::SUM)) &&
+	   t+1 >= samples_per_pixel ) {
+	T v = c->accum;
+	y = g.h-1 - g.h*(v-c->spec.ymin)/(c->spec.ymax-c->spec.ymin);
+	c->accum = 0;
+	c->print_val = v;
+      }
+      if ( y >= 0 ) {
+	if ( c->spec.flags & chanspec::LINE ) {
+	  if ( x ) g.line(x-1, c->prev_y, x, y);
+	  c->prev_y = y;
+	} else
+	  g.point(x, y);
+      }
     }
     void run_gui() {
       g.events();
@@ -360,17 +383,8 @@ namespace leansdr {
       g.setfg(255, 255, 255);
       g.transient_text(g.w*3/4, 20, text);
     }
-  private:
-    int nchans;
-    struct channel {
-      chanspec spec;
-      pipereader<T> *in;
-      float accum;
-      int prev_y;
-      float print_val;
-    } *chans;
     gfx g;
-    unsigned long t;
+    unsigned long t;  // Time for synchronous channels
     int x;
     int total_samples;
   };
