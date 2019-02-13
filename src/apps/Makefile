@@ -1,8 +1,15 @@
-default:	native
+default:	generic
+
+help:
+	@echo "make generic      - With generic flags."
+	@echo "make embedded     - Static, with platform-specific flags"
+	@echo "make OUTDIR=...   - Change output directory"
+
+OUTDIR	= .
 
 VERSION	:= leansdr-$(shell git describe)
 
-# Portable flags for development.
+# Generic flags, for development.
 
 CXXFLAGS	= -O3 -I.. -DVERSION=\"$(VERSION)\" \
 		  -Wall \
@@ -10,19 +17,29 @@ CXXFLAGS	= -O3 -I.. -DVERSION=\"$(VERSION)\" \
 
 LDFLAGS		=
 
+DEPS	= ../leansdr/*.h
+
+# Uncomment to compile features with potential intellectual property issues.
+#CXXFLAGS	+= -DLEANSDR_EXTENSIONS
+
 # Base applications have no external dependencies.
 APPS	=
 APPS	+= leandvbtx leandvb
 APPS	+= leansdrscan leansdrserv
 APPS	+= leantsgen leansdrcat leanchansim
 
+ifneq "$(wildcard /usr/include/X11/Xlib.h)" ""
+$(OUTDIR)/leandvb:	CXXFLAGS_APP=-DGUI
+$(OUTDIR)/leandvb:	LDFLAGS_APP=-lX11
+else
+$(info libX11 not found. Will not support --gui).
+endif
 
 # leanmlmrx requires fftw3 and pthread.
 ifneq "$(wildcard /usr/include/fftw3.h)" ""
 ifneq "$(wildcard /usr/include/pthread.h)" ""
-APPS		+= leanmlmrx
-CXXFLAGS	+=
-LDFLAGS		+= -lfftw3f -lpthread
+APPS	+= leanmlmrx
+$(OUTDIR)/leanmlmrx:	LDFLAGS_APP=-lfftw3f -lpthread
 else
 $(info libpthread not found. Will not build leanmlmrx.)
 endif
@@ -35,49 +52,19 @@ endif
 # (Assume libiio dependencies are satisfied.)
 ifneq "$(wildcard libiio/iio.h)" ""
 APPS		+= leaniiorx leaniiotx
-CXXFLAGS	+= -Ilibiio
-LDFLAGS		+= -Llibiio -L. -liio -lpthread -lxml2 -lz -llzma
+$(OUTDIR)/leaniiorx $(OUTDIR)/leaniiotx:	CXXFLAGS_APP=-Ilibiio
+$(OUTDIR)/leaniiorx $(OUTDIR)/leaniiotx:	LDFLAGS_APP=-Llibiio -Llibiio-$(ARCH) -L. -liio -lpthread -lxml2 -lz -llzma
 else
 $(info libiio not found. Will not build leaniio{rx,tx}.)
 endif
 
-# Enable X11 GUI if easily found.
-ifneq "$(wildcard /usr/include/X11/Xlib.h)" ""
-CXXFLAGS_GUI	= -DGUI
-LDFLAGS_GUI	= -lX11
-else
-$(info X11 not found. Will not compile GUI.)
-endif
+$(OUTDIR)/%:	%.cc $(DEPS) $(DEPS_APP)
+	g++ $(CXXFLAGS) $(CXXFLAGS_APP) $< $(LDFLAGS) $(LDFLAGS_APP) -o $@
 
-DEPS	= ../leansdr/*.h
+generic:	$(APPS:%=$(OUTDIR)/%)
 
-%:	%.cc $(DEPS)
-	g++ $(CXXFLAGS) $(CXXFLAGS_GUI) $< $(LDFLAGS) $(LDFLAGS_GUI) -o $@
+embedded:	$(APPS:%=$(OUTDIR)/%)
+embedded:	LDFLAGS+=-static
 
-native::	$(APPS)
-	@echo "Now 'make embedded' to also build static binaries."
-
-clean::
-	rm -f $(APPS)
-
-##### CPU-specific flags for embedded platforms.
-
-ARCH	:= $(shell uname -m)
-
-ifeq "$(ARCH)" "armv7l"
-CXXFLAGS_EMBEDDED	= $(CXXFLAGS) -Ofast -mfpu=neon -funsafe-math-optimizations -fsingle-precision-constant
-LDFLAGS_EMBEDDED	= $(LDFLAGS) -static
-else
-ifeq "$(ARCH)" "armv6l"
-CXXFLAGS_EMBEDDED	= $(CXXFLAGS) -Ofast -funsafe-math-optimizations -fsingle-precision-constant
-LDFLAGS_EMBEDDED	= $(LDFLAGS) -static
-else
-CXXFLAGS_EMBEDDED	= $(CXXFLAGS)
-LDFLAGS_EMBEDDED	= $(LDFLAGS) -static
-endif
-endif
-
-embedded:	$(APPS:%=%.$(ARCH))
-
-%.$(ARCH):	%.cc $(DEPS)
-	g++ $(CXXFLAGS_EMBEDDED) $< $(LDFLAGS_EMBEDDED) -o $@
+clean:
+	rm -f $(APPS:%=$(OUTDIR)/%)
