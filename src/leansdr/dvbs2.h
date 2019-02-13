@@ -1990,7 +1990,7 @@ namespace leansdr {
 	uint8_t *end = buf + framebytes;
 	// EN 302 307-1 section 5.1.6 Base-Band Header insertion
 	uint8_t *bbheader = buf;
-	*buf++ = 0x03 | rolloff_code;  // MATYPE-1
+	*buf++ = 0x30 | rolloff_code;  // MATYPE-1: SIS, CCM
 	*buf++ = 0;                    // MATYPE-2
 	uint16_t upl = 188 * 8;
 	*buf++ = upl >> 8;             // UPL MSB
