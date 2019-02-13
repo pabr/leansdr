@@ -205,7 +205,7 @@ struct runtime_common {
     int w_fft = 1024, h_fft = 256;
     int wh_const = 256;
 
-    int x0 = 100, y0 = 40;
+    int x0 = 100, y0 = 20;
 
     static window_placement window_hints[] = {
       { "rawiq (iq)", x0, y0, wh_const,wh_const },
@@ -214,8 +214,8 @@ struct runtime_common {
       { "preprocessed (spectrum)", x0+300, y0+300, w_fft, h_fft },
       { "PSK symbols", x0, y0+600, wh_const, wh_const },  // TBD obsolete
       { "cstln", x0, y0+600, wh_const, wh_const },
-      { "PLS cstln", x0, y0+900, wh_const, wh_const },
-      { "timeline", x0+300, y0+600, w_timeline, h_timeline },
+      { "PLS cstln", x0+300, y0+600, wh_const, wh_const },
+      { "timeline", x0+600, y0+600, w_timeline, h_timeline },
       { NULL, }
     };
     sch->windows = window_hints;
