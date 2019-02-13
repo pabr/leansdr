@@ -1756,7 +1756,8 @@ namespace leansdr {
 	  s2_ldpc_engine *ldpc = s2ldpc.ldpcs[pin->pls.sf][mcinfo->rate];
 	  int ncorr = ldpc->decode_bitflip
 	    (fi->ldpc, pin->bytes, msgbits, cwbits, bitflips);
-	  fprintf(stderr, "LDPCCORR = %d\n", ncorr);
+	  if ( sch->debug )
+	    fprintf(stderr, "LDPCCORR = %d\n", ncorr);
 	}
 	uint8_t *hardbytes = softbytes_harden(pin->bytes, fi->kldpc/8, bch_buf);
 	if ( true ) {
@@ -1767,7 +1768,8 @@ namespace leansdr {
 	  // Decode with suitable BCH decoder for this MODCOD
 	  bch_interface *bch = s2bch.bchs[pin->pls.sf][mcinfo->rate];
 	  int ncorr = bch->decode(hardbytes, cwbytes);
-	  fprintf(stderr, "BCHCORR = %d\n", ncorr);
+	  if ( sch->debug )
+	    fprintf(stderr, "BCHCORR = %d\n", ncorr);
 	  corrupted = (ncorr < 0);
 	  // Report VER
 	  opt_write(bitcount, fi->Kbch);
@@ -2073,10 +2075,13 @@ namespace leansdr {
       uint8_t crc = bbh[9];
       uint8_t *data = bbh + 10;
       int ro_code = bbh[0] & 3;
-      static float ro_values[] = { 0.35, 0.25, 0.20, 0 };
-      fprintf(stderr, "BBH: crc %02x/%02x %s ma=%02x%02x ro=%.2f upl=%d dfl=%d sync=%02x syncd=%d\n",
-	      crc, crcexp, (crc==crcexp)?"OK":"KO",
-	      bbh[0], bbh[1], ro_values[ro_code], upl, dfl, sync, syncd);
+      if ( sch->debug ) {
+	static float ro_values[] = { 0.35, 0.25, 0.20, 0 };
+	fprintf(stderr, "BBH: crc %02x/%02x %s ma=%02x%02x ro=%.2f"
+		" upl=%d dfl=%d sync=%02x syncd=%d\n",
+		crc, crcexp, (crc==crcexp)?"OK":"KO",
+		bbh[0], bbh[1], ro_values[ro_code], upl, dfl, sync, syncd);
+      }
       if ( crc!=crcexp || upl!=188*8 || sync!=0x47 || dfl>58112 || syncd>dfl ||
 	   (dfl&7) || (syncd&7) ) {
 	// Note: Maybe accept syncd=65535
