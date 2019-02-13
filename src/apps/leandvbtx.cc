@@ -26,7 +26,7 @@
 #include "leansdr/dsp.h"
 #include "leansdr/sdr.h"
 #include "leansdr/dvb.h"
-#include "leansdr/rs.h"
+#include "leansdr/dvbs2.h"
 #include "leansdr/filtergen.h"
 
 using namespace leansdr;
@@ -55,8 +55,14 @@ private:
 };
 
 struct config {
+  enum dvb_version { DVB_S, DVB_S2 } standard;
+  // DVB-S
   cstln_predef constellation;
   code_rate fec;
+  // DVB-S2
+  s2_pls pls;
+  // Common
+  int buf_factor;
   float amp;       // Desired RMS constellation amplitude
   bool agc;
   int interp;
@@ -67,22 +73,26 @@ struct config {
   bool fill;
   bool verbose, debug;
   config()
-    : constellation(QPSK), fec(FEC12),
-      amp(1.0), agc(false),
+    : standard(DVB_S), constellation(QPSK), fec(FEC12),
+      buf_factor(2),
+      amp(1.0f), agc(false),
       interp(2), decim(1), rolloff(0.35), rrc_rej(10),
       output_format(OUTPUT_F32),
       fill(false),
       verbose(false), debug(false)
-  { }
+  {
+    pls.modcod = 13;  // 8PSK 2/3
+    pls.sf = false;
+    pls.pilots = false;
+  }
 };
     
-void run(config &cfg) {
+void run_dvbs(config &cfg) {
   scheduler sch;
   sch.verbose = cfg.verbose;
   sch.debug = cfg.debug;
 
-  int buf_factor = 2;
-  unsigned long BUF_PACKETS = 12*buf_factor;  // TBD Reduce copying
+  unsigned long BUF_PACKETS = 12*cfg.buf_factor;  // TBD Reduce copying
   unsigned long BUF_BYTES = SIZE_RSPACKET*BUF_PACKETS;
   unsigned long BUF_SYMBOLS = BUF_BYTES*8 * 2;  // Worst case BPSK 1/2
   unsigned long BUF_BASEBAND = 4096;
@@ -197,6 +207,134 @@ void run(config &cfg) {
   if ( sch.verbose ) sch.dump();
 }
 
+#ifndef LEANSDR_EXTENSIONS
+void run_dvbs2(config &cfg) {
+  fail("DVB-S2 support not enabled at compile-time.");
+}
+#else
+void run_dvbs2(config &cfg) {
+  scheduler sch;
+  sch.verbose = cfg.verbose;
+  sch.debug = cfg.debug;
+
+  unsigned long BUF_PACKETS = (64800/8+187)/188 * cfg.buf_factor * 2;
+  unsigned long BUF_FRAMES = cfg.buf_factor;
+  unsigned long BUF_SLOTS =
+    (1+modcod_info::MAX_SLOTS_PER_FRAME) * cfg.buf_factor;
+  unsigned long BUF_SYMBOLS =
+    modcod_info::MAX_SYMBOLS_PER_FRAME * cfg.buf_factor;
+  unsigned long BUF_BASEBAND = BUF_SYMBOLS;
+
+  // TS PACKETS ON STDIN
+
+  pipebuf<tspacket> p_tspackets(&sch, "TS packets", BUF_PACKETS);
+  file_reader<tspacket> r_stdin(&sch, 0, p_tspackets);
+
+  // MODE ADAPTATION
+
+  pipebuf<bbframe> p_bbframes(&sch, "Scr BB frames", BUF_FRAMES);
+  s2_framer r_framer(&sch, p_tspackets, p_bbframes);
+  r_framer.pls = cfg.pls;
+  if      ( cfg.rolloff > 0.40 )  r_framer.rolloff_code = 3;
+  else if ( cfg.rolloff > 0.30 )  r_framer.rolloff_code = 0;  // 0.35
+  else if ( cfg.rolloff > 0.225 ) r_framer.rolloff_code = 1;  // 0.25
+  else if ( cfg.rolloff > 0.15 )  r_framer.rolloff_code = 2;  // 0.20
+  else                            r_framer.rolloff_code = 3;
+  if ( r_framer.rolloff_code == 3 )
+    fprintf(stderr, "Warning: Roll-off value not supported by DVB-S2\n");
+
+  // FEC ENCODING
+
+  pipebuf< fecframe<hard_ss> >
+    p_fecframes(&sch, "FEC frames", BUF_FRAMES);
+  s2_fecenc r_fecenc(&sch, p_bbframes, p_fecframes);
+
+  // INTERLEAVING
+
+  pipebuf< plslot<hard_ss> > p_slots(&sch, "PL slots", BUF_SLOTS);
+  s2_interleaver r_inter(&sch, p_fecframes, p_slots);
+
+  // PL FRAMING
+
+  pipebuf<cf32> p_iqsymbols(&sch, "symbols", BUF_SYMBOLS);
+  s2_frame_transmitter<float> r_transmitter(&sch, p_slots, p_iqsymbols);
+
+  pipebuf<cf32> *p_tail = &p_iqsymbols;
+
+  // RESAMPLING
+
+  if ( cfg.interp>1 || cfg.amp!=1.0f ) {
+    pipebuf<cf32> *p_interp =
+      new pipebuf<cf32>(&sch, "interpolated", BUF_BASEBAND);
+    float Fm = 1.0 / cfg.interp;
+    int order = cfg.interp * cfg.rrc_rej;
+    float *coeffs;
+    int ncoeffs = filtergen::root_raised_cosine
+      (order, Fm, cfg.rolloff, &coeffs);
+    // This yields about the desired power level even without AGC.
+    filtergen::normalize_power(ncoeffs, coeffs, cfg.amp/cstln_amp);
+    if ( sch.verbose )
+      fprintf(stderr, "Interpolation: ratio %d/%d, rolloff %f, %d coeffs\n",
+	      cfg.interp, cfg.decim, cfg.rolloff, ncoeffs);
+    if ( sch.debug )
+      filtergen::dump_filter("rrc", ncoeffs, coeffs);
+    fir_resampler<cf32,float> *r_resampler =
+      new fir_resampler<cf32,float>(&sch, ncoeffs, coeffs,
+				    *p_tail, *p_interp, cfg.interp, 1);
+    p_tail = p_interp;
+  }
+
+  if ( cfg.decim > 1 ) {
+    fail("decim not implemented");
+    // TBD Combine interp and decim
+    // pipebuf<cf32> *p_resampled(&sch, "resampled", BUF_BASEBAND);
+    // decimator<cf32> r_decim(&sch, cfg.decim, p_interp, p_resampled);
+  }
+
+  // AGC
+
+  if ( cfg.agc ) {
+    pipebuf<cf32> *p_agc =
+      new pipebuf<cf32>(&sch, "AGC", BUF_BASEBAND);
+    simple_agc<f32> *r_agc =
+      new simple_agc<f32>(&sch, *p_tail, *p_agc);
+    r_agc->out_rms = cfg.amp / sqrtf((float)cfg.interp/cfg.decim);
+    // Adjust bandwidth for large interpolation ratios.
+    r_agc->bw = 0.001 * cfg.decim / cfg.interp;
+    p_tail = p_agc;
+  }
+
+  // IQ ON STDOUT
+
+  switch ( cfg.output_format ) {
+  case config::OUTPUT_F32:
+    (void)new file_writer<cf32>(&sch, *p_tail, 1);
+    break;
+  case config::OUTPUT_S16: {
+    pipebuf<cs16> *p_stdout =
+      new pipebuf<cs16>(&sch, "stdout", BUF_BASEBAND);
+    (void)new cconverter<f32,0, int16_t,0, 32768,1>(&sch, *p_tail, *p_stdout);
+    (void)new file_writer<cs16>(&sch, *p_stdout, 1);
+    break;
+  }
+  default:
+    fail("Output format not implemented");
+  }
+
+  if ( cfg.fill ) {
+    if ( cfg.verbose ) fprintf(stderr, "Realtime mode\n");
+    tspacket blank;
+    memset(blank.data, 0, 188);
+    blank.data[0] = 0x47;
+    r_stdin.set_realtime(blank);
+  }
+
+  sch.run();
+  sch.shutdown();
+  if ( sch.verbose ) sch.dump();
+}  // run_dvbs2
+#endif  // LEANSDR_EXTENSIONS
+
 // Command-line
 
 void usage(const char *name, FILE *f, int c, const char *info=NULL) {
@@ -204,23 +342,29 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
   fprintf(f, "Modulate MPEG packets into a DVB-S baseband signal\n");
   fprintf(f, "Output float complex samples\n");
   fprintf
-    (f, "\nOptions:\n"
-     "  --const STRING           QPSK (default),\n"
-     "                           BPSK .. 32APSK (DVB-S2),\n"
-     "                           64APSKe (DVB-S2X),\n"
-     "                           16QAM .. 256QAM (experimental)\n"
-     "  --cr STRING              1/2, 2/3, 3/4, 5/6, 7/8\n"
-     "  -f INTERP[/DECIM]        Samples per symbols (default: 2)\n"
-     "  --roll-off FLOAT         RRC roll-off (default: 0.35)\n"
-     "  --rrc-rej FLOAT          RRC filter rejection (defaut: 10)\n"
-     "  --power FLOAT            Output power (dB, default: 0)\n"
-     "  --agc                    Better regulation of output power\n"
-     "  --f32                    Output 32-bit floats, range +-1.0 (default)\n"
-     "  --s16                    Output 16-bit ints\n"
-     "  --fill                   Insert blank packets\n"
-     "  -v                       Output debugging info at startup and exit\n"
-     "  -d                       Output debugging info during operation\n"
-     "  --version                Display version and exit\n"
+    (f,
+     "\nOptions:\n"
+     "  --standard S      DVB-S (default), DVB-S2 (work in progress)\n"
+     "  --const STRING    DVB-S constellation\n"
+     "                    QPSK (default),\n"
+     "                    BPSK .. 32APSK (DVB-S2),\n"
+     "                    64APSKe (DVB-S2X),\n"
+     "                    16QAM .. 256QAM (experimental)\n"
+     "  --cr STRING       DVB-S code rate: 1/2(default), 2/3, 3/4, 5/6, 7/8\n"
+     "  --modcod INT      Set DVB-S2 modcod number\n"
+     "  --shortframes     Generate short frames\n"
+     "  --pilots          Generate pilots\n"
+     "  -f INTERP[/DECIM] Samples per symbols (default: 2)\n"
+     "  --roll-off FLOAT  RRC roll-off (default: 0.35)\n"
+     "  --rrc-rej FLOAT   RRC filter rejection (defaut: 10)\n"
+     "  --power FLOAT     Output power (dB, default: 0)\n"
+     "  --agc             Better regulation of output power\n"
+     "  --f32             Output 32-bit floats, range +-1.0 (default)\n"
+     "  --s16             Output 16-bit ints\n"
+     "  --fill            Insert blank packets\n"
+     "  -v                Output debugging info at startup and exit\n"
+     "  -d                Output debugging info during operation\n"
+     "  --version         Display version and exit\n"
      );
   if ( info ) fprintf(f, "** Error while processing '%s'\n", info);
   exit(c);
@@ -240,19 +384,26 @@ int main(int argc, char *argv[]) {
       printf("%s\n", VERSION);
       exit(0);
     }
+    else if ( ! strcmp(argv[i], "--standard") && i+1<argc ) {
+      ++i;
+      if      ( ! strcmp(argv[i], "DVB-S" ) )
+	cfg.standard = config::DVB_S;
+      else if ( ! strcmp(argv[i], "DVB-S2" ) )
+	cfg.standard = config::DVB_S2;
+      else usage(argv[0], stderr, 1, argv[i]);
+    }
+    else if ( ! strcmp(argv[i], "--buf-factor") && i+1<argc )
+      cfg.buf_factor = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--cr") && i+1<argc ) {
       ++i;
-      // DVB-S
-      if      ( ! strcmp(argv[i], "1/2" ) ) cfg.fec = FEC12;
-      else if ( ! strcmp(argv[i], "2/3" ) ) cfg.fec = FEC23;
-      else if ( ! strcmp(argv[i], "3/4" ) ) cfg.fec = FEC34;
-      else if ( ! strcmp(argv[i], "5/6" ) ) cfg.fec = FEC56;
-      else if ( ! strcmp(argv[i], "7/8" ) ) cfg.fec = FEC78;
-      // DVB-S2
-      else if ( ! strcmp(argv[i], "4/5"  ) ) cfg.fec = FEC45;
-      else if ( ! strcmp(argv[i], "8/9"  ) ) cfg.fec = FEC89;
-      else if ( ! strcmp(argv[i], "9/10" ) ) cfg.fec = FEC910;
-      else usage(argv[0], stderr, 1, argv[i]);
+      int f;
+      for ( f=0; f<FEC_COUNT; ++f )
+	if ( ! strcmp(argv[i], fec_names[f]) ) {
+	  cfg.fec = (code_rate)f;
+	  break;
+	}
+      if ( f == FEC_COUNT )
+	usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
       ++i;
@@ -265,6 +416,12 @@ int main(int argc, char *argv[]) {
       if ( c == cstln_predef::COUNT )
 	usage(argv[0], stderr, 1, argv[i]);
     }
+    else if ( ! strcmp(argv[i], "--modcod") && i+1<argc )
+      cfg.pls.modcod = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--shortframes") )
+      cfg.pls.sf = true;
+    else if ( ! strcmp(argv[i], "--pilots") )
+      cfg.pls.pilots = true;
     else if ( ! strcmp(argv[i], "-f") && i+1<argc ) {
       ++i;
       cfg.decim = 1;
@@ -289,7 +446,10 @@ int main(int argc, char *argv[]) {
       usage(argv[0], stderr, 1, argv[i]);
   }
 
-  run(cfg);
+  switch ( cfg.standard ) {
+  case config::DVB_S:  run_dvbs(cfg); break;
+  case config::DVB_S2: run_dvbs2(cfg); break;
+  }
 
   return 0;
 }
