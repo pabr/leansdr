@@ -39,11 +39,6 @@ struct drifter : runnable {
       in(_in), out(_out),
       t(0) {
     memset(drifts, 0, sizeof(drifts));
-    for ( int i=0; i<65536; ++i ) {
-      float a = 2*M_PI * i / 65536;
-      lut_trig[i].re = cosf(a);
-      lut_trig[i].im = sinf(a);
-    }
   }
   
   static const int NCOMPONENTS = 3;
@@ -51,35 +46,39 @@ struct drifter : runnable {
   struct component {
     float amp;       // Amplitude of fluctuation (Hz)
     float freq;      // Rate of fluctuation (Hz)
-    signed long a;   // Phase at runtime (2pi/2^32)
+    double a;        // Phase at runtime *65536.
+                     // Needs more resolution than float.
   } drifts[NCOMPONENTS];
   
   void run() {
     unsigned long count = min(in.readable(), out.writable());
     complex<T> *pin = in.rd(), *pend = pin+count;
     complex<T> *pout = out.wr();
-    signed short phase = 0;
+
     for ( ; pin<pend; ++pin,++pout,t+=1 ) {
       float f = 0;
       for ( int i=0; i<NCOMPONENTS; ++i ) {
-	complex<float> *r = &lut_trig[(unsigned short)(drifts[i].a>>16)];
+	const complex<float> *r = &trig.expi((float)drifts[i].a);
 	f += drifts[i].amp * r->im;
-	drifts[i].a += drifts[i].freq * 4294967296.0;
+	drifts[i].a += drifts[i].freq * 65536.0;
       }
       phase += f * 65536;
-      complex<float> *r = &lut_trig[(unsigned short)phase];
+      const complex<float> *r = &trig.expi(phase);
       pout->re = pin->re*r->re - pin->im*r->im;
       pout->im = pin->re*r->im + pin->im*r->re;
     }
     in.read(count);
     out.written(count);
+    for ( int i=0; i<NCOMPONENTS; ++i )
+      drifts[i].a -= 65536 * floor(drifts[i].a/65536);
+    phase -= 65536 * floor(phase/65536);
   }
-
 private:
-  complex<float> lut_trig[65536];
+  trig16 trig;
   pipereader< complex<T> > in;
   pipewriter< complex<T> > out;
   unsigned long t;
+  float phase;
 };
 
 struct config {
@@ -214,6 +213,7 @@ void usage(const char *name, FILE *f, int c) {
   fprintf(f,
 	  "\nNoise options:\n"
 	  "  --awgn STDDEV      Add white gaussian noise (dB)\n"
+	  "  --deterministic    Don't seed RNG\n"
 	  );
   fprintf(f,
 	  "\nOutput options:\n"
