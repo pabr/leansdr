@@ -38,7 +38,23 @@ namespace leansdr {
     FEC12, FEC23, FEC46, FEC34, FEC56, FEC78,  // DVB-S
     FEC45, FEC89, FEC910,                      // DVB-S2
     FEC14, FEC13, FEC25, FEC35,                // DVB-S2
-    FEC_MAX
+    FEC_COUNT
+  };
+
+  static const char *fec_names[] = {
+    [FEC12]    = "1/2",
+    [FEC23]    = "2/3",
+    [FEC46]    = "4/6",
+    [FEC34]    = "3/4",
+    [FEC56]    = "5/6",
+    [FEC78]    = "7/8",
+    [FEC45]    = "4/5",
+    [FEC89]    = "8/9",
+    [FEC910]   = "9/10",
+    [FEC14]    = "1/4",
+    [FEC13]    = "1/3",
+    [FEC25]    = "2/5",
+    [FEC35]    = "3/5",
   };
 
   // Customize APSK radii according to code rate
@@ -556,7 +572,7 @@ namespace leansdr {
     int bits_in;   // Entering the convolutional coder
     int bits_out;  // Exiting the convolutional coder
     const uint16_t *polys;  // [bits_out]
-  } fec_specs[FEC_MAX] = {
+  } fec_specs[FEC_COUNT] = {
     [FEC12] = { 1, 2, polys_fec12 },
     [FEC23] = { 2, 3, polys_fec23 },
     [FEC46] = { 4, 6, polys_fec46 },
@@ -950,9 +966,11 @@ namespace leansdr {
   };  // deinterleaver
 
 
-  static const int SIZE_TSPACKET = 188;
-  struct tspacket { u8 data[SIZE_TSPACKET]; };
-
+  static const int SIZE_TSPACKET = 188;  // TBD remove
+  struct tspacket {
+    static const int SIZE = 188;
+    u8 data[SIZE_TSPACKET];
+  };
 
   // RS ENCODER
 
