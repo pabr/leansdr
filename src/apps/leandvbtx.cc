@@ -57,7 +57,7 @@ private:
 struct config {
   enum dvb_version { DVB_S, DVB_S2 } standard;
   // DVB-S
-  cstln_predef constellation;
+  cstln_base::predef constellation;
   code_rate fec;
   // DVB-S2
   s2_pls pls;
@@ -73,7 +73,7 @@ struct config {
   bool fill;
   bool verbose, debug;
   config()
-    : standard(DVB_S), constellation(QPSK), fec(FEC12),
+    : standard(DVB_S), constellation(cstln_base::QPSK), fec(FEC12),
       buf_factor(2),
       amp(1.0f), agc(false),
       interp(2), decim(1), rolloff(0.35), rrc_rej(10),
@@ -408,12 +408,12 @@ int main(int argc, char *argv[]) {
     else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
       ++i;
       int c;
-      for ( c=0; c<cstln_predef::COUNT; ++c )
-	if ( ! strcmp(argv[i], cstln_names[c]) ) {
-	  cfg.constellation = (cstln_predef)c;
+      for ( c=0; c<cstln_base::COUNT; ++c )
+	if ( ! strcmp(argv[i], cstln_base::names[c]) ) {
+	  cfg.constellation = (cstln_base::predef)c;
 	  break;
 	}
-      if ( c == cstln_predef::COUNT )
+      if ( c == cstln_base::COUNT )
 	usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--modcod") && i+1<argc )

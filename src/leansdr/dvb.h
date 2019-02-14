@@ -60,11 +60,11 @@ namespace leansdr {
   // Customize APSK radii according to code rate
 
   template<typename SOFTSYMB>
-  cstln_lut<SOFTSYMB,256> * make_dvbs2_constellation(cstln_predef c,
+  cstln_lut<SOFTSYMB,256> * make_dvbs2_constellation(cstln_base::predef c,
 						     code_rate r) {
     float gamma1=1, gamma2=1, gamma3=1;
     switch ( c ) {
-    case APSK16:
+    case cstln_base::APSK16:
       // EN 302 307, section 5.4.3, Table 9
       switch ( r ) {
       case FEC23:
@@ -77,7 +77,7 @@ namespace leansdr {
       default: fail("Code rate not supported with APSK16");
       }
       break;
-    case APSK32:
+    case cstln_base::APSK32:
       // EN 302 307, section 5.4.4, Table 10
       switch ( r ) {
       case FEC34:  gamma1 = 2.84; gamma2 = 5.27; break;
@@ -88,7 +88,7 @@ namespace leansdr {
       default: fail("Code rate not supported with APSK32");
       }
       break;
-    case APSK64E:
+    case cstln_base::APSK64E:
       // EN 302 307-2, section 5.4.5, Table 13f
       gamma1 = 2.4; gamma2 = 4.3; gamma3 = 7;
       break;

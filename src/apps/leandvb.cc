@@ -64,7 +64,7 @@ struct config {
 
   float Fm;            // QPSK symbol rate (Hz) 
   enum dvb_version { DVB_S, DVB_S2 } standard;
-  cstln_predef constellation;
+  cstln_base::predef constellation;
   bool strongpls;      // For S2 APSK, expect PLS symbols at maximum amplitude
   code_rate fec;
   float Ftune;         // Bias frequency for the QPSK demodulator (Hz)
@@ -113,7 +113,7 @@ struct config {
       awgn(0),
       Fm(2e6),
       standard(DVB_S),
-      constellation(QPSK),
+      constellation(cstln_base::QPSK),
       strongpls(false),
       fec(FEC12),
       Ftune(0),
@@ -158,7 +158,7 @@ void output_initial_info(FILE *f, const config &cfg) {
   fprintf(f, "STANDARD %s%s%s\n", quote, standard_names[cfg.standard], quote);
   if ( cfg.standard == config::DVB_S ) {
     fprintf(f, "CONSTELLATION %s%s%s\n",
-	    quote, cstln_names[cfg.constellation], quote);
+	    quote, cstln_base::names[cfg.constellation], quote);
     fec_spec *fs = &fec_specs[cfg.fec];
     fprintf(f, "CR %s%d/%d%s\n", quote, fs->bits_in, fs->bits_out, quote);
   }
@@ -708,8 +708,8 @@ int run_dvbs(config &cfg) {
 				     *run.p_preprocessed, p_symbols,
 				     run.p_freq, run.p_ss, run.p_mer,
 				     run.p_cstln);
-  if ( cfg.constellation != QPSK &&
-       cfg.constellation != BPSK )
+  if ( cfg.constellation != cstln_base::QPSK &&
+       cfg.constellation != cstln_base::BPSK )
     fprintf(stderr, "Warning: non-standard constellation for DVB-S\n");
   demod.cstln = make_dvbs2_constellation<softsymb>(cfg.constellation, cfg.fec);
 #if 0  // Dump LUT as greymap
@@ -1116,7 +1116,7 @@ int run_highspeed(config &cfg) {
   // TBD retype preprocess as unsigned char
   cstln_receiver<f32> demod(&sch, p_rawiqf, p_symbols,
 			    &p_freq, NULL, NULL, &p_sampledf);
-  cstln_lut<256> qpsk(QPSK);
+  cstln_lut<256> qpsk(cstln_base::QPSK);
   demod.cstln = &qpsk;
   // Convert the sampled symbols to cu8 for GUI
   cconverter<f32,0, u8,128, 1,1>
@@ -1406,12 +1406,12 @@ int main(int argc, const char *argv[]) {
     else if ( ! strcmp(argv[i], "--const") && i+1<argc ) {
       ++i;
       int c;
-      for ( c=0; c<cstln_predef::COUNT; ++c )
-	if ( ! strcmp(argv[i], cstln_names[c]) ) {
-	  cfg.constellation = (cstln_predef)c;
+      for ( c=0; c<cstln_base::COUNT; ++c )
+	if ( ! strcmp(argv[i], cstln_base::names[c]) ) {
+	  cfg.constellation = (cstln_base::predef)c;
 	  break;
 	}
-      if ( c == cstln_predef::COUNT )
+      if ( c == cstln_base::COUNT )
 	usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--strongpls") )

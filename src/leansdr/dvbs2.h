@@ -193,44 +193,44 @@ namespace leansdr {
       ((MAX_SLOTS_PER_FRAME-1)/16)*pilot_length;
     int nslots_nf;     // Number of 90-symbol slots per normal frame
     int nsymbols;      // Symbols in the constellation
-    cstln_predef c;
+    cstln_base::predef c;
     code_rate rate;
     // EN 302 307 section 6 Error performance
     float esn0_nf;     // Ideal Es/N0 for normal frames
   } modcod_infos[32] = {
     { 0, },
     // 1 - 11
-    { 360,  4, QPSK,   FEC14,   -2.35 },
-    { 360,  4, QPSK,   FEC13,   -1.24 },
-    { 360,  4, QPSK,   FEC25,   -0.30 },
-    { 360,  4, QPSK,   FEC12,    1.00 },
-    { 360,  4, QPSK,   FEC35,    2.23 },
-    { 360,  4, QPSK,   FEC23,    3.10 },
-    { 360,  4, QPSK,   FEC34,    4.03 },
-    { 360,  4, QPSK,   FEC45,    4.68 },
-    { 360,  4, QPSK,   FEC56,    5.18 },
-    { 360,  4, QPSK,   FEC89,    6.20 },
-    { 360,  4, QPSK,   FEC910,   6.42 },
+    { 360,  4, cstln_base::QPSK,   FEC14,   -2.35 },
+    { 360,  4, cstln_base::QPSK,   FEC13,   -1.24 },
+    { 360,  4, cstln_base::QPSK,   FEC25,   -0.30 },
+    { 360,  4, cstln_base::QPSK,   FEC12,    1.00 },
+    { 360,  4, cstln_base::QPSK,   FEC35,    2.23 },
+    { 360,  4, cstln_base::QPSK,   FEC23,    3.10 },
+    { 360,  4, cstln_base::QPSK,   FEC34,    4.03 },
+    { 360,  4, cstln_base::QPSK,   FEC45,    4.68 },
+    { 360,  4, cstln_base::QPSK,   FEC56,    5.18 },
+    { 360,  4, cstln_base::QPSK,   FEC89,    6.20 },
+    { 360,  4, cstln_base::QPSK,   FEC910,   6.42 },
     // 12 - 17
-    { 240,  8, PSK8,   FEC35,    5.50 },
-    { 240,  8, PSK8,   FEC23,    6.62 },
-    { 240,  8, PSK8,   FEC34,    7.91 },
-    { 240,  8, PSK8,   FEC56,    9.35 },
-    { 240,  8, PSK8,   FEC89,   10.69 },
-    { 240,  8, PSK8,   FEC910,  10.98 },
+    { 240,  8, cstln_base::PSK8,   FEC35,    5.50 },
+    { 240,  8, cstln_base::PSK8,   FEC23,    6.62 },
+    { 240,  8, cstln_base::PSK8,   FEC34,    7.91 },
+    { 240,  8, cstln_base::PSK8,   FEC56,    9.35 },
+    { 240,  8, cstln_base::PSK8,   FEC89,   10.69 },
+    { 240,  8, cstln_base::PSK8,   FEC910,  10.98 },
     // 18 - 23
-    { 180, 16, APSK16, FEC23,    8.97 },
-    { 180, 16, APSK16, FEC34,   10.21 },
-    { 180, 16, APSK16, FEC45,   11.03 },
-    { 180, 16, APSK16, FEC56,   11.61 },
-    { 180, 16, APSK16, FEC89,   12.89 },
-    { 180, 16, APSK16, FEC910,  13.13 },
+    { 180, 16, cstln_base::APSK16, FEC23,    8.97 },
+    { 180, 16, cstln_base::APSK16, FEC34,   10.21 },
+    { 180, 16, cstln_base::APSK16, FEC45,   11.03 },
+    { 180, 16, cstln_base::APSK16, FEC56,   11.61 },
+    { 180, 16, cstln_base::APSK16, FEC89,   12.89 },
+    { 180, 16, cstln_base::APSK16, FEC910,  13.13 },
     // 24 - 28
-    { 144, 32, APSK32, FEC34,   12.73 },
-    { 144, 32, APSK32, FEC45,   13.64 },
-    { 144, 32, APSK32, FEC56,   14.28 },
-    { 144, 32, APSK32, FEC89,   15.69 },
-    { 144, 32, APSK32, FEC910,  16.05 },
+    { 144, 32, cstln_base::APSK32, FEC34,   12.73 },
+    { 144, 32, cstln_base::APSK32, FEC45,   13.64 },
+    { 144, 32, cstln_base::APSK32, FEC56,   14.28 },
+    { 144, 32, cstln_base::APSK32, FEC89,   15.69 },
+    { 144, 32, cstln_base::APSK32, FEC910,  16.05 },
     // 29 - 31
     { 0, },
     { 0, },
@@ -395,7 +395,7 @@ namespace leansdr {
 	scrambling(0)
     {
       // Constellation for PLS
-      qpsk = make_dvbs2_constellation<SOFTSYMB>(QPSK, FEC12);
+      qpsk = make_dvbs2_constellation<SOFTSYMB>(cstln_base::QPSK, FEC12);
       add_syncs(qpsk);
 
       max_freqw16 = 65536.0 / 16;  // SR/16  (TBD: 16APSK, 32APSKK)
@@ -676,7 +676,7 @@ namespace leansdr {
 	  delete cstln;
 	}
 	fprintf(stderr, "Creating LUT for %s ratecode %d\n",
-		cstln_names[mcinfo->c], mcinfo->rate);
+		cstln_base::names[mcinfo->c], mcinfo->rate);
 	cstln = make_dvbs2_constellation<SOFTSYMB>(mcinfo->c, mcinfo->rate);
 #if 0
 	fprintf(stderr, "Dumping constellation LUT to stdout.\n");

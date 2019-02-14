@@ -378,16 +378,23 @@ namespace leansdr {
     return 128 - ss.bits[bit];
   }
 
-  enum cstln_predef {
-    BPSK,                    // DVB-S2 (and DVB-S variant)
-    QPSK,                    // DVB-S
-    PSK8, APSK16, APSK32,    // DVB-S2
-    APSK64E,                 // DVB-S2X
-    QAM16, QAM64, QAM256,    // For experimentation only
-    COUNT
-  };
+  struct cstln_base {
+    enum predef {
+      BPSK,                    // DVB-S2 (and DVB-S variant)
+      QPSK,                    // DVB-S
+      PSK8, APSK16, APSK32,    // DVB-S2
+      APSK64E,                 // DVB-S2X
+      QAM16, QAM64, QAM256,    // For experimentation only
+      COUNT
+    };
+    static const char *names[];
+    float amp_max;  // Max amplitude. 1 for PSK, 0 if not applicable.
+    complex<int8_t> *symbols;
+    int nsymbols;
+    int nrotations;
+  };  // cstln_base
 
-  static const char *cstln_names[] = {
+  const char *cstln_base::names[] = {
     [BPSK]    = "BPSK",
     [QPSK]    = "QPSK",
     [PSK8]    = "8PSK",
@@ -399,16 +406,9 @@ namespace leansdr {
     [QAM256]  = "256QAM"
   };
 
-  struct cstln_base {
-    float amp_max;  // Max amplitude. 1 for PSK, 0 if not applicable.
-    complex<int8_t> *symbols;
-    int nsymbols;
-    int nrotations;
-  };  // cstln_base
-
   template<typename SOFTSYMB, int R>
   struct cstln_lut : cstln_base {
-    cstln_lut(cstln_predef type,
+    cstln_lut(cstln_base::predef type,
 	      float gamma1=1, float gamma2=1, float gamma3=1) {
       switch ( type ) {
       case BPSK:
