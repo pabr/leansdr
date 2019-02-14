@@ -711,7 +711,7 @@ int run_dvbs(config &cfg) {
   if ( cfg.constellation != cstln_base::QPSK &&
        cfg.constellation != cstln_base::BPSK )
     fprintf(stderr, "Warning: non-standard constellation for DVB-S\n");
-  demod.cstln = make_dvbs2_constellation<softsymb>(cfg.constellation, cfg.fec);
+  demod.cstln = new cstln_lut<softsymb,256>(cfg.constellation);
 #if 0  // Dump LUT as greymap
   demod.cstln->dump(stdout, 0);
   exit(0);

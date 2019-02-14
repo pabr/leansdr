@@ -409,6 +409,7 @@ namespace leansdr {
   template<typename SOFTSYMB, int R>
   struct cstln_lut : cstln_base {
     cstln_lut(cstln_base::predef type,
+	      float mer=10,
 	      float gamma1=1, float gamma2=1, float gamma3=1) {
       switch ( type ) {
       case BPSK:
@@ -423,7 +424,7 @@ namespace leansdr {
 	symbols[0] = polar(1, 8, 1);
 	symbols[1] = polar(1, 8, 5);
 #endif
-	make_lut_from_symbols();
+	make_lut_from_symbols(mer);
 	break;
       case QPSK:
 	amp_max = 1;
@@ -436,7 +437,7 @@ namespace leansdr {
 	symbols[1] = polar(1, 4, 3.5);
 	symbols[2] = polar(1, 4, 1.5);
 	symbols[3] = polar(1, 4, 2.5);
-	make_lut_from_symbols();
+	make_lut_from_symbols(mer);
 	break;
       case PSK8:
 	amp_max = 1;
@@ -452,7 +453,7 @@ namespace leansdr {
 	symbols[5] = polar(1, 8, 7);
 	symbols[6] = polar(1, 8, 3);
 	symbols[7] = polar(1, 8, 6);
-	make_lut_from_symbols();
+	make_lut_from_symbols(mer);
 	break;
       case APSK16: {
 	// EN 302 307, section 5.4.3
@@ -478,7 +479,7 @@ namespace leansdr {
 	symbols[13] = polar(r1, 4,   3.5);
 	symbols[14] = polar(r1, 4,   1.5);
 	symbols[15] = polar(r1, 4,   2.5);
-	make_lut_from_symbols();
+	make_lut_from_symbols(mer);
 	break;
       }
       case APSK32: {
@@ -522,7 +523,7 @@ namespace leansdr {
 	symbols[29] = polar(r3, 16,  5  );
 	symbols[30] = polar(r3, 16,  8  );
 	symbols[31] = polar(r3, 16, 10  );
-	make_lut_from_symbols();
+	make_lut_from_symbols(mer);
 	break;
       }
       case APSK64E: {
@@ -552,7 +553,7 @@ namespace leansdr {
 	polar2(52, r3,  7.0/20, 33.0/20, 13.0/20, 27.0/20);
 	polar2(56, r3,  3.0/20, 37.0/20, 17.0/20, 23.0/20);
 	polar2(60, r2,  1.0/ 4,  7.0/ 4,  3.0/ 4,  5.0/ 4);
-	make_lut_from_symbols();
+	make_lut_from_symbols(mer);
 	break;
       }
       case QAM16:
@@ -632,13 +633,11 @@ namespace leansdr {
 	  symbols[s].im = Q * scale * cstln_amp;
 	  ++s;
 	}
-      make_lut_from_symbols();
+      make_lut_from_symbols(20);  // TBD
     }
     result lut[R][R];
-    void make_lut_from_symbols() {
-      // Note: Excessively low values will break 16APSK and 32APSK.
-      float mer = 12.0;  // TBD Make a-priori SNR configurable
-      fprintf(stderr, "Decision optimized for MER %.1f dB\n", mer);
+    void make_lut_from_symbols(float mer) {
+      // Note: Excessively low values of MER will break 16APSK and 32APSK.
       float sigma = cstln_amp * exp10f(-mer/20);
 
       // Precomputed values.

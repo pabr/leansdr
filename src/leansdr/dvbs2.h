@@ -195,8 +195,13 @@ namespace leansdr {
     int nsymbols;      // Symbols in the constellation
     cstln_base::predef c;
     code_rate rate;
+    // Ideal Es/N0 for normal frames
     // EN 302 307 section 6 Error performance
-    float esn0_nf;     // Ideal Es/N0 for normal frames
+    float esn0_nf;
+    // Radii for APSK
+    // EN 302 307, section 5.4.3, Table 9
+    // EN 302 307, section 5.4.4, Table 10
+    float g1, g2, g3;
   } modcod_infos[32] = {
     { 0, },
     // 1 - 11
@@ -219,18 +224,18 @@ namespace leansdr {
     { 240,  8, cstln_base::PSK8,   FEC89,   10.69 },
     { 240,  8, cstln_base::PSK8,   FEC910,  10.98 },
     // 18 - 23
-    { 180, 16, cstln_base::APSK16, FEC23,    8.97 },
-    { 180, 16, cstln_base::APSK16, FEC34,   10.21 },
-    { 180, 16, cstln_base::APSK16, FEC45,   11.03 },
-    { 180, 16, cstln_base::APSK16, FEC56,   11.61 },
-    { 180, 16, cstln_base::APSK16, FEC89,   12.89 },
-    { 180, 16, cstln_base::APSK16, FEC910,  13.13 },
+    { 180, 16, cstln_base::APSK16, FEC23,    8.97,   3.15 },
+    { 180, 16, cstln_base::APSK16, FEC34,   10.21,   2.85 },
+    { 180, 16, cstln_base::APSK16, FEC45,   11.03,   2.75 },
+    { 180, 16, cstln_base::APSK16, FEC56,   11.61,   2.70 },
+    { 180, 16, cstln_base::APSK16, FEC89,   12.89,   2.60 },
+    { 180, 16, cstln_base::APSK16, FEC910,  13.13,   2.57 },
     // 24 - 28
-    { 144, 32, cstln_base::APSK32, FEC34,   12.73 },
-    { 144, 32, cstln_base::APSK32, FEC45,   13.64 },
-    { 144, 32, cstln_base::APSK32, FEC56,   14.28 },
-    { 144, 32, cstln_base::APSK32, FEC89,   15.69 },
-    { 144, 32, cstln_base::APSK32, FEC910,  16.05 },
+    { 144, 32, cstln_base::APSK32, FEC34,   12.73,   2.84, 5.27 },
+    { 144, 32, cstln_base::APSK32, FEC45,   13.64,   2.72, 4.87 },
+    { 144, 32, cstln_base::APSK32, FEC56,   14.28,   2.64, 4.64 },
+    { 144, 32, cstln_base::APSK32, FEC89,   15.69,   2.54, 4.33 },
+    { 144, 32, cstln_base::APSK32, FEC910,  16.05,   2.53, 4.30 },
     // 29 - 31
     { 0, },
     { 0, },
@@ -332,7 +337,9 @@ namespace leansdr {
 	}
 	if ( sch->debug )
 	  fprintf(stderr, "Building constellation %d\n", mcinfo->nsymbols);
-	cstln = make_dvbs2_constellation<hard_ss>(mcinfo->c, mcinfo->rate);
+	// TBD Different Es/N0 for short frames ?
+	cstln = new cstln_lut<hard_ss,256>(mcinfo->c, mcinfo->esn0_nf,
+					   mcinfo->g1, mcinfo->g2, mcinfo->g3);
 	csymbols = new complex<T>[cstln->nsymbols];
 	for ( int s=0; s<cstln->nsymbols; ++s ) {
 	  csymbols[s].re = cstln->symbols[s].re;
@@ -395,7 +402,7 @@ namespace leansdr {
 	scrambling(0)
     {
       // Constellation for PLS
-      qpsk = make_dvbs2_constellation<SOFTSYMB>(cstln_base::QPSK, FEC12);
+      qpsk = new cstln_lut<SOFTSYMB,256>(cstln_base::QPSK);
       add_syncs(qpsk);
 
       max_freqw16 = 65536.0 / 16;  // SR/16  (TBD: 16APSK, 32APSKK)
@@ -677,7 +684,8 @@ namespace leansdr {
 	}
 	fprintf(stderr, "Creating LUT for %s ratecode %d\n",
 		cstln_base::names[mcinfo->c], mcinfo->rate);
-	cstln = make_dvbs2_constellation<SOFTSYMB>(mcinfo->c, mcinfo->rate);
+	cstln = new cstln_lut<SOFTSYMB,256>(mcinfo->c, mcinfo->esn0_nf,
+					    mcinfo->g1,mcinfo->g2,mcinfo->g3);
 #if 0
 	fprintf(stderr, "Dumping constellation LUT to stdout.\n");
 	cstln->dump(stdout);

@@ -120,7 +120,7 @@ void run_dvbs(config &cfg) {
   // CONVOLUTIONAL CODER
 
   cstln_lut<hard_ss,256> *cstln =
-    make_dvbs2_constellation<hard_ss>(cfg.constellation, cfg.fec);
+    new cstln_lut<hard_ss,256>(cfg.constellation);
   int bits_per_symbol = log2i(cstln->nsymbols);
 
   if ( cfg.fec==FEC23 && (cstln->nsymbols==4 ||

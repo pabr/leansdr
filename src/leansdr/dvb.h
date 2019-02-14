@@ -57,46 +57,6 @@ namespace leansdr {
     [FEC35]    = "3/5",
   };
 
-  // Customize APSK radii according to code rate
-
-  template<typename SOFTSYMB>
-  cstln_lut<SOFTSYMB,256> * make_dvbs2_constellation(cstln_base::predef c,
-						     code_rate r) {
-    float gamma1=1, gamma2=1, gamma3=1;
-    switch ( c ) {
-    case cstln_base::APSK16:
-      // EN 302 307, section 5.4.3, Table 9
-      switch ( r ) {
-      case FEC23:
-      case FEC46:  gamma1 = 3.15; break;
-      case FEC34:  gamma1 = 2.85; break;
-      case FEC45:  gamma1 = 2.75; break;
-      case FEC56:  gamma1 = 2.70; break;
-      case FEC89:  gamma1 = 2.60; break;
-      case FEC910: gamma1 = 2.57; break;
-      default: fail("Code rate not supported with APSK16");
-      }
-      break;
-    case cstln_base::APSK32:
-      // EN 302 307, section 5.4.4, Table 10
-      switch ( r ) {
-      case FEC34:  gamma1 = 2.84; gamma2 = 5.27; break;
-      case FEC45:  gamma1 = 2.72; gamma2 = 4.87; break;
-      case FEC56:  gamma1 = 2.64; gamma2 = 4.64; break;
-      case FEC89:  gamma1 = 2.54; gamma2 = 4.33; break;
-      case FEC910: gamma1 = 2.53; gamma2 = 4.30; break;
-      default: fail("Code rate not supported with APSK32");
-      }
-      break;
-    case cstln_base::APSK64E:
-      // EN 302 307-2, section 5.4.5, Table 13f
-      gamma1 = 2.4; gamma2 = 4.3; gamma3 = 7;
-      break;
-    default:
-      break;
-    }
-    return new cstln_lut<SOFTSYMB,256>(c, gamma1, gamma2, gamma3);
-  }
 
   // EN 300 421, section 4.4.3, table 2 Punctured code, G1=0171, G2=0133
   static const int DVBS_G1 = 0171;
