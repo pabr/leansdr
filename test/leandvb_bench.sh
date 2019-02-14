@@ -140,7 +140,7 @@ s_ft() {
     local args="$1"
     local name="$2"
     local snr=$(echo "$3 + 10" | bc -l)
-    test_series "S_FT_NF_$name" 4 $snr "$STX $args" "$SRX $args"
+    test_series "S_FT_$name" 4 $snr "$STX $args" "$SRX $args"
 }
 
 s_ft  "--cr 1/2" "QPSK_1/2"     4.5
@@ -235,7 +235,8 @@ S2LDPC="--ldpc-helper ./ldpc_tool"
 
 test_series "S2_LHBP_QPSK_1/4"    2 "7 6 5 4.75"        "$S2TX --modcod 1 " "$S2RX $S2LDPC"
 test_series "S2_LHBP_QPSK_1/2"    2 "7 6 5.5 5 4.75 4.5 4.25" "$S2TX --modcod 4 " "$S2RX $S2LDPC"
-test_series "S2_LHBP_QPSK_9/10"   2 "10 9.5 9 8 7.5 7"       "$S2TX --modcod 11" "$S2RX $S2LDPC"
+test_series "S2_LHBP_QPSK_2/3"    2 "7 6 5.5 5.25 5" "$S2TX --modcod 6 " "$S2RX $S2LDPC"
+test_series "S2_LHBP_QPSK_9/10"   2 "9 8 7.75 7.5"       "$S2TX --modcod 11" "$S2RX $S2LDPC"
 test_series "S2_LHBP_8PSK_2/3"    2 "12 11 10.9 10.8 10 9 8"      "$S2TX --modcod 13" "$S2RX $S2LDPC"
 test_series "S2_LHBP_8PSK_9/10"   2 "13 12.9 12.8 12 11.5 11"      "$S2TX --modcod 17" "$S2RX $S2LDPC"
 test_series "S2_LHBP_16APSK_2/3"  2 "14 13.75 13.5"    "$S2TX --modcod 18" "$S2RX $S2LDPC"
