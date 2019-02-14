@@ -564,7 +564,7 @@ namespace leansdr {
     // State transtion
     void enter_frame_locked() {
       opt_write(state_out, 1);
-      fprintf(stderr, "LOCKED\n");
+      if ( sch->debug ) fprintf(stderr, "LOCKED\n");
       state = FRAME_LOCKED;
     }
 
@@ -660,6 +660,14 @@ namespace leansdr {
 	enter_frame_search();
 	return;
       }
+#if 1   // TBD use fec_infos
+      if ( pls.sf && mcinfo->rate==FEC910 ) {
+	fprintf(stderr, "Unsupported or corrupted FEC\n");
+	in.read(ss.p-in.rd());
+	enter_frame_search();
+	return;
+      }
+#endif
 
       // TBD Comparison of nsymbols is insufficient for DVB-S2X.
       if ( !cstln || cstln->nsymbols!=mcinfo->nsymbols ) {
@@ -1587,10 +1595,13 @@ namespace leansdr {
       for ( int sf=0; sf<=1; ++sf ) {
 	for ( int fec=0; fec<FEC_COUNT; ++fec ) {
 	  const fec_info *fi = &fec_infos[sf][fec];
-	  if ( ! fi->ldpc ) continue;
-	  int n = (sf ? 64800/4 : 64800);
-	  int k = fi->kldpc;
-	  ldpcs[sf][fec] = new s2_ldpc_engine(fi->ldpc, k, n);
+	  if ( ! fi->ldpc ) {
+	    ldpcs[sf][fec] = NULL;
+	  } else {
+	    int n = (sf ? 64800/4 : 64800);
+	    int k = fi->kldpc;
+	    ldpcs[sf][fec] = new s2_ldpc_engine(fi->ldpc, k, n);
+	  }
 	}
       }
     }
