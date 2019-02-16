@@ -75,11 +75,11 @@ namespace leansdr {
     runnable_common *runnables[MAX_RUNNABLES];
     int nrunnables;
     window_placement *windows;
-    bool verbose, debug;
+    bool verbose, debug, debug2;
 
     scheduler()
       : npipes(0), nrunnables(0), windows(NULL),
-	verbose(false), debug(false) {
+	verbose(false), debug(false), debug2(false) {
     }
     void add_pipe(pipebuf_common *p) {
       if ( npipes == MAX_PIPES ) fail("MAX_PIPES");

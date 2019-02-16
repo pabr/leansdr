@@ -200,6 +200,7 @@ struct runtime_common {
     sch = new scheduler();
     sch->verbose = cfg.verbose;
     sch->debug = cfg.debug;
+    sch->debug2 = cfg.debug2;
 
     int w_timeline = 512, h_timeline = 256;
     int w_fft = 1024, h_fft = 256;
