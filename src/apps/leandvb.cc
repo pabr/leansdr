@@ -105,7 +105,7 @@ struct config {
       buf_factor(4),
       Fs(2.4e6),
       Fderot(0),
-      anf(1),
+      anf(0),
       cnr(false),
       decim(0),
       fd_pp(-1),
@@ -1302,7 +1302,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
   fprintf
     (f,
      "\nPreprocessing options:\n"
-     "  --anf INT             Number of birdies to remove (default: 1)\n"
+     "  --anf INT             Number of birdies to remove (default: 0)\n"
      "  --derotate HZ         For use with --fd-pp, otherwise use --tune\n"
      "  --resample            Resample baseband (CPU-intensive)\n"
      "  --resample-rej FLOAT  Aliasing rejection (default: 10)\n"
