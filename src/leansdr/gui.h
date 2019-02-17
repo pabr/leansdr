@@ -391,16 +391,21 @@ namespace leansdr {
   
   template<typename T>
   struct spectrumscope : runnable {
-    T ymax;
-    float amax;
     unsigned long size;
+    float amax;
     unsigned long decimation;
     spectrumscope(scheduler *sch, pipebuf< complex<T> > & _in,
 		  T _max, const char *_name=NULL)
       : runnable(sch, _name?_name:_in.name),
-	ymax(_max), amax(_max),
-	size(4096), decimation(DEFAULT_GUI_DECIMATION),
-	in(_in), phase(0), g(sch, name), fft(NULL) {
+	size(4096), amax(_max/sqrtf(size)),
+	decimation(DEFAULT_GUI_DECIMATION),
+	in(_in),
+	nmarkers(0),
+	phase(0), g(sch, name), fft(NULL) {
+    }
+    void mark_freq(float f) {
+      if ( nmarkers == MAX_MARKERS ) fail("Too many markers");
+      markers[nmarkers++] = f;
     }
     void run() {
       while ( in.readable() >= size ) {
@@ -411,6 +416,9 @@ namespace leansdr {
     }
   private:
     pipereader< complex<T> > in;
+    static const int MAX_MARKERS = 4;
+    float markers[MAX_MARKERS];
+    int nmarkers;
     int phase;
     gfx g;
     cfft_engine<float> *fft;
@@ -449,6 +457,11 @@ namespace leansdr {
       g.clear();
       g.setfg(255, 255, 255);
       g.line(g.w/2,0, g.w/2,g.h);
+      g.setfg(255, 0, 0);
+      for ( int i=0; i<nmarkers; ++i ) {
+	int x = g.w * (0.5+markers[i]);
+	g.line(x,0, x,g.h);
+      }
     }
   };
   

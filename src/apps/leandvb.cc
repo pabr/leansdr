@@ -309,7 +309,9 @@ struct runtime_common {
 	new cscope<f32>(sch, *p_rawiq, -amp, amp, "rawiq (iq)");
       spectrumscope<f32> *r_fft_raw =
 	new spectrumscope<f32>(sch, *p_rawiq, amp, "rawiq (spectrum)");
-      r_fft_raw->amax *= 0.25;
+      r_fft_raw->amax *= sqrtf(cfg.Fs/cfg.Fm);
+      r_fft_raw->mark_freq((cfg.Fderot+cfg.Ftune-cfg.Fm/2) / cfg.Fs);
+      r_fft_raw->mark_freq((cfg.Fderot+cfg.Ftune+cfg.Fm/2) / cfg.Fs);
     }
 #else
     (void)amp;  // GCC warning
@@ -452,7 +454,9 @@ struct runtime_common {
       spectrumscope<f32> *r_fft_pp =
 	new spectrumscope<f32>(sch, *p_preprocessed, amp,
 			       "preprocessed (spectrum)");
-      r_fft_pp->amax *= 0.25;
+      r_fft_pp->amax *= sqrtf(Fspp/cfg.Fm);
+      r_fft_pp->mark_freq((cfg.Ftune-cfg.Fm/2) / Fspp);
+      r_fft_pp->mark_freq((cfg.Ftune+cfg.Fm/2) / Fspp);
       r_fft_pp->decimation /= decimpp;
     }
 #endif
