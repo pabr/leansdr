@@ -410,7 +410,7 @@ namespace leansdr {
   struct cstln_lut : cstln_base {
     cstln_lut(cstln_base::predef type,
 	      float mer=10,
-	      float gamma1=1, float gamma2=1, float gamma3=1) {
+	      float gamma1=0, float gamma2=0, float gamma3=0) {
       switch ( type ) {
       case BPSK:
 	amp_max = 1;
@@ -456,6 +456,8 @@ namespace leansdr {
 	make_lut_from_symbols(mer);
 	break;
       case APSK16: {
+	// Default gamma for non-DVB-S2 applications.
+	if ( ! gamma1 ) gamma1 = 2.57;
 	// EN 302 307, section 5.4.3
 	float r1 = sqrtf(4 / (1+3*gamma1*gamma1));
 	float r2 = gamma1 * r1;
@@ -483,6 +485,9 @@ namespace leansdr {
 	break;
       }
       case APSK32: {
+	// Default gammas for non-DVB-S2 applications.
+	if ( ! gamma1 ) gamma1 = 2.53;
+	if ( ! gamma2 ) gamma2 = 4.30;
 	// EN 302 307, section 5.4.3
 	float r1 = sqrtf(8 / (1+3*gamma1*gamma1+4*gamma2*gamma2));
 	float r2 = gamma1 * r1;
@@ -527,6 +532,10 @@ namespace leansdr {
 	break;
       }
       case APSK64E: {
+	// Default gammas for non-DVB-S2 applications.
+	if ( ! gamma1 ) gamma1 = 2.4;
+	if ( ! gamma2 ) gamma2 = 4.3;
+	if ( ! gamma3 ) gamma3 = 7.0;
 	// EN 302 307-2, section 5.4.5, Table 13e
 	float r1 =
 	  sqrtf(64 / (4+12*gamma1*gamma1+20*gamma2*gamma2+28*gamma3*gamma3));
