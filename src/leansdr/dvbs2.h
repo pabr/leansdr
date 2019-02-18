@@ -505,7 +505,7 @@ namespace leansdr {
       opt_write(state_out, 0);
       mu = 0;
       phase16 = 0;
-      fprintf(stderr, "ACQ\n");
+      if ( sch->debug ) fprintf(stderr, "ACQ\n");
       state = FRAME_SEARCH;
     }
 
@@ -544,8 +544,9 @@ namespace leansdr {
 	  ps->hist = (ps->hist<<1) | ((ps->tobpsk>>symb)&1);
 	  int errors = hamming_weight((ps->hist&sof.MASK)^sof.VALUE);
 	  if ( errors <= S2_MAX_ERR_SOF_INITIAL ) {
-	    fprintf(stderr, "Found SOF+%d at %d offset %f\n",
-		    errors, s, ps->offset16);
+	    if ( sch->debug2 )
+	      fprintf(stderr, "Found SOF+%d at %d offset %f\n",
+		      errors, s, ps->offset16);
 	    ss.ph16 += ps->offset16;
 	    in.read(ss.p-in.rd());
 	    mu = ss.mu;
@@ -641,7 +642,8 @@ namespace leansdr {
 	if ( e < pls_errors ) { pls_errors=e; pls_index=i; }
       }
       if ( pls_index < 0 ) {
-	xfprintf(stderr, "Too many errors in plheader (%d)\n", pls_errors);
+	if ( sch->debug2 )
+	  fprintf(stderr, "Too many errors in plheader (%d)\n", pls_errors);
 	in.read(ss.p-in.rd());
 	enter_frame_search();
 	return;
@@ -727,7 +729,8 @@ namespace leansdr {
 	    corr.im += d.im - d.re;
 	  }
 	  if ( errors > S2_MAX_ERR_PILOT ) {
-	    xfprintf(stderr, "Too many errors in pilot (%d/36)\n", errors);
+	    if ( sch->debug2 )
+	      fprintf(stderr, "Too many errors in pilot (%d/36)\n", errors);
 	    in.read(ss.p-in.rd());
 	    enter_frame_search();
 	    return;
@@ -779,7 +782,8 @@ namespace leansdr {
       }
       int sof_errors = hamming_weight(sofbits ^ sof.VALUE);
       if ( sof_errors >= S2_MAX_ERR_SOF ) {
-	xfprintf(stderr, "Too many errors in SOF (%d/26)\n", sof_errors);
+	if ( sch->debug2 )
+	  fprintf(stderr, "Too many errors in SOF (%d/26)\n", sof_errors);
 	in.read(ss.p-in.rd());
 	enter_coarse_freq();
 	return;
