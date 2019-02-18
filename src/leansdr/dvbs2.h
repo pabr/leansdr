@@ -493,8 +493,6 @@ namespace leansdr {
 		coarse_count, freqw, freqw*Fm/(2*M_PI), Fm);
 	freqw16 = freqw * 65536 / (2*M_PI);
 #if 1
-	freqw16 = (fabsf(freqw16)*Fm/65536>200e3) ? 65536*397e3/Fm : 0;
-	//freqw16 = 65536 * 397e3 / Fm;
 	freqw16 = 65536 * Ftune;
 	fprintf(stderr, "DEBUG: FORCE COARSE %f\n", freqw16*Fm/65536);
 #endif
@@ -1767,6 +1765,7 @@ namespace leansdr {
 	const modcod_info *mcinfo = check_modcod(pin->pls.modcod);
 	const fec_info *fi = &fec_infos[pin->pls.sf][mcinfo->rate];
 	bool corrupted = false;
+	bool residual_errors;
 	if ( true ) {
 	  // LDPC decode
 	  size_t cwbits = pin->pls.framebits();
@@ -1775,8 +1774,7 @@ namespace leansdr {
 	  s2_ldpc_engine *ldpc = s2ldpc.ldpcs[pin->pls.sf][mcinfo->rate];
 	  int ncorr = ldpc->decode_bitflip
 	    (fi->ldpc, pin->bytes, msgbits, cwbits, bitflips);
-	  if ( sch->debug )
-	    fprintf(stderr, "LDPCCORR = %d\n", ncorr);
+	  if ( sch->debug2 ) fprintf(stderr, "LDPCCORR = %d\n", ncorr);
 	}
 	uint8_t *hardbytes = softbytes_harden(pin->bytes, fi->kldpc/8, bch_buf);
 	if ( true ) {
@@ -1787,9 +1785,9 @@ namespace leansdr {
 	  // Decode with suitable BCH decoder for this MODCOD
 	  bch_interface *bch = s2bch.bchs[pin->pls.sf][mcinfo->rate];
 	  int ncorr = bch->decode(hardbytes, cwbytes);
-	  if ( sch->debug )
-	    fprintf(stderr, "BCHCORR = %d\n", ncorr);
+	  if ( sch->debug2 ) fprintf(stderr, "BCHCORR = %d\n", ncorr);
 	  corrupted = (ncorr < 0);
+	  residual_errors = (ncorr != 0);
 	  // Report VER
 	  opt_write(bitcount, fi->Kbch);
 	  opt_write(errcount, (ncorr>=0) ? ncorr : fi->Kbch);
@@ -1809,6 +1807,8 @@ namespace leansdr {
 	  bbscrambling.transform(hardbytes, bbsize, pout->bytes);
 	  out.written(1);
 	}
+	if ( sch->debug )
+	  fprintf(stderr, "%c", corrupted ? ':' : residual_errors ? '.' : '_');
 	in.read(1);
       }
     }
@@ -1987,7 +1987,7 @@ namespace leansdr {
       size_t chkbytes = cwbytes - msgbytes;
       bch_interface *bch = s2bch.bchs[job->pls.sf][mcinfo->rate];
       int ncorr = bch->decode(hardbytes, cwbytes);
-      fprintf(stderr, "BCHCORR = %d\n", ncorr);
+      if ( sch->debug2 ) fprintf(stderr, "BCHCORR = %d\n", ncorr);
       bool corrupted = (ncorr < 0);
       // Report VBER
       opt_write(bitcount, fi->Kbch);
@@ -2006,6 +2006,8 @@ namespace leansdr {
 	bbscrambling.transform(hardbytes, fi->Kbch/8, pout->bytes);
 	out.written(1);
       }
+      if ( sch->debug )
+	fprintf(stderr, "%c", corrupted ? '!' : ncorr ? '.' : '_');
     }
     pipereader< fecframe<SOFTBYTE> > in;
     pipewriter<bbframe> out;
@@ -2132,7 +2134,7 @@ namespace leansdr {
       uint8_t crc = bbh[9];
       uint8_t *data = bbh + 10;
       int ro_code = bbh[0] & 3;
-      if ( sch->debug ) {
+      if ( sch->debug2 ) {
 	static float ro_values[] = { 0.35, 0.25, 0.20, 0 };
 	fprintf(stderr, "BBH: crc %02x/%02x %s ma=%02x%02x ro=%.2f"
 		" upl=%d dfl=%d sync=%02x syncd=%d\n",
