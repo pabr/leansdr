@@ -359,14 +359,10 @@ namespace leansdr {
   };
   void to_softsymb(const full_ss *fss, llr_ss *ss) {
     for ( int b=0; b<8; ++b ) {
-#if 1  // TBD Linear works better ?
-      int r = 127 - 254*fss->p[b];
-#else
-      float v = (1.0f-fss->p[b])/(fss->p[b]+1e-6);
-      int r = logf(v) * 32;
-#endif
+      float v = (1.0f-fss->p[b]) / (fss->p[b]+1e-6);
+      int r = logf(v) * 5;  // TBD Optimal scaling vs saturation ?
       if ( r < -127 ) r = -127;
-      if ( r > 127 ) r = 127;
+      if ( r >  127 ) r =  127;
       ss->bits[b] = r;
     }
   }
