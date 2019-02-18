@@ -74,6 +74,7 @@ struct config {
   bool hard_metric;
   int ldpc_bf;
   const char *ldpc_helper;
+  int nhelpers;
   bool resample;
   float resample_rej;  // Approx. filter rejection in dB
   enum { SAMP_NEAREST, SAMP_LINEAR, SAMP_RRC } sampler;
@@ -123,6 +124,7 @@ struct config {
       hard_metric(false),
       ldpc_bf(0),
       ldpc_helper(NULL),
+      nhelpers(1),
       resample(false),
       resample_rej(10),
       sampler(config::SAMP_LINEAR),
@@ -241,7 +243,7 @@ struct runtime_common {
     }
 
     // Min buffer size for TS packets: Up to 39 per BBFRAME
-    unsigned long BUF_S2PACKETS = 39 * cfg.buf_factor;
+    unsigned long BUF_S2PACKETS = (fec_info::KBCH_MAX/188/8+1) * cfg.buf_factor;
     // Min buffer size for misc measurements: 1
     unsigned long BUF_SLOW = cfg.buf_factor;
 
@@ -479,7 +481,7 @@ struct runtime_common {
     p_cstln_pls = new pipebuf<cf32>(sch, "PLS cstln", BUF_BASEBAND);
     p_framelock = new pipebuf<int>(sch, "frame lock", BUF_SLOW);
     p_vber = new pipebuf<float>(sch, "VBER", BUF_SLOW);
-    p_lock = new pipebuf<int>(sch, "lock", BUF_SLOW);
+    p_lock = new pipebuf<int>(sch, "lock", BUF_SLOW*2);
     p_locktime = new pipebuf<unsigned long>(sch, "locktime", BUF_S2PACKETS);
 
     rrc_steps = cfg.rrc_steps;
@@ -685,9 +687,11 @@ int run_dvbs2(config &cfg) {
       new pipebuf< fecframe<llr_sb> >(run.sch, "FEC frames", BUF_FRAMES);
     new s2_deinterleaver<llr_ss,llr_sb>(run.sch, p_slots, *p_fecframes);
     // Decode FEC-protected frames into plain BB frames.
-    new s2_fecdec_helper<llr_t,llr_sb>(run.sch, *p_fecframes, p_bbframes,
-				       cfg.ldpc_helper,
-				       run.p_vbitcount, run.p_verrcount);
+    s2_fecdec_helper<llr_t,llr_sb> *r_fecdec =
+      new s2_fecdec_helper<llr_t,llr_sb>(run.sch, *p_fecframes, p_bbframes,
+					 cfg.ldpc_helper,
+					 run.p_vbitcount, run.p_verrcount);
+    r_fecdec->nhelpers = cfg.nhelpers;
   }
 
   // Deframe BB frames to TS packets
@@ -1334,6 +1338,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --ldpc-bf INT     Max number of LDPC bitflips (default: 0)\n"
      "  --ldpc-helper CMD Spawn external LDPC decoder:\n"
      "                    'CMD --standard DVB-S2 --modcod N [--shortframes]'\n"
+     "  --nhelpers INT    Number of decoder processes (default:1)\n"
      );
   fprintf
     (f,
@@ -1440,6 +1445,8 @@ int main(int argc, const char *argv[]) {
       cfg.ldpc_bf = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--ldpc-helper") && i+1<argc )
       cfg.ldpc_helper = argv[++i];
+    else if ( ! strcmp(argv[i], "--nhelpers") && i+1<argc )
+      cfg.nhelpers = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--hard-metric") )
       cfg.hard_metric = true;
     else if ( ! strcmp(argv[i], "--filter") ) {
