@@ -594,7 +594,7 @@ struct runtime_common {
 
     slowmultiscope<f32>::chanspec chans[] = {
       { p_freq, "estimated frequency", "Offset %3.3f kHz", {0,255,255},
-	cfg.Fm*1e-3f,  // TBD S2 specific
+	cfg.Fs*1e-3f,
 	(cfg.Ftune-cfg.Fm/2)*1e-3f, (cfg.Ftune+cfg.Fm/2)*1e-3f,
 	slowmultiscope<f32>::chanspec::WRAP },
       { p_ss, "signal strength", "SS %3.3f", {255,0,0},

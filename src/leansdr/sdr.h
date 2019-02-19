@@ -724,7 +724,7 @@ namespace leansdr {
   template<typename T>
   struct sampler_interface {
     virtual complex<T> interp(const complex<T> *pin, float mu, float phase) = 0;
-    virtual void update_freq(float freqw) { }  // 65536 = 1 Hz
+    virtual void update_freq(float freqw, int period=1) { }  // 65536 = 1 Hz
     virtual int readahead() = 0;
   };
 
@@ -757,7 +757,7 @@ namespace leansdr {
       return s0*(1-mu) + s1*mu;
     }
 
-    void update_freq(float _freqw) { freqw = _freqw; }
+    void update_freq(float _freqw, int period=1) { freqw = _freqw; }
 
   private:
     trig16 trig;
@@ -799,10 +799,10 @@ namespace leansdr {
       return trig.expi(-phase) * acc;
     }
 
-    void update_freq(float freqw) {
+    void update_freq(float freqw, int period) {
       // Throttling: Update one coeff per 16 processed samples,
       // to keep the overhead of freq tracking below about 10%.
-      update_freq_phase -= 128;  // chunk_size of cstln_receiver
+      update_freq_phase -= period;
       if ( update_freq_phase <= 0  ) {
 	update_freq_phase = ncoeffs*16;
 	do_update_freq(freqw);
@@ -922,7 +922,7 @@ namespace leansdr {
 	      ( !mer_out   || mer_out  ->writable()>=max_meas ) &&
 	      ( !cstln_out || cstln_out->writable()>=max_meas ) ) {
 
-	sampler->update_freq(freqw);
+	sampler->update_freq(freqw, chunk_size);
 
 	complex<T> *pin=in.rd(), *pin0=pin, *pend=pin+chunk_size;
 	SOFTSYMB *pout=out.wr(), *pout0=pout;
@@ -988,7 +988,7 @@ namespace leansdr {
 	// Normalize phase so that it never exceeds 32 bits.
 	// Max freqw is 2^31/65536/chunk_size = 256 Hz
 	// (this may happen with leandvb --drift --decim).
-	phase = fmodf(phase, 65536);
+	phase = fmodf(phase, 65536);  // Rounding direction irrelevant
 
 	if ( cstln_point ) {
 	  

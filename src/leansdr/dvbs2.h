@@ -405,9 +405,6 @@ namespace leansdr {
       qpsk = new cstln_lut<SOFTSYMB,256>(cstln_base::QPSK);
       add_syncs(qpsk);
 
-      max_freqw16 = 65536.0 / 16;  // SR/16  (TBD: 16APSK, 32APSKK)
-      min_freqw16 = - max_freqw16;
-
       init_coarse_freq();
 
 #if TEST_DIVERSITY
@@ -473,9 +470,11 @@ namespace leansdr {
       init_coarse_freq();
     }
 
-    // TBD allow manual Ftune>SR/8
-
     void run_frame_coarse() {
+      freqw16 = 65536 * Ftune;
+      min_freqw16 = freqw16 - 65536.0/9;
+      max_freqw16 = freqw16 + 65536.0/9;
+
       complex<T> *pin = in.rd();
       complex<T> p = *pin++;
       int nsamples = MAX_SYMBOLS_PER_FRAME * omega;
@@ -491,10 +490,10 @@ namespace leansdr {
 	float freqw = atan2f(diffcorr.im, diffcorr.re) * omega;
 	fprintf(stderr, "COARSE(%d): %f rad/symb (%.0f Hz at %.0f baud)\n",
 		coarse_count, freqw, freqw*Fm/(2*M_PI), Fm);
+#if 0
 	freqw16 = freqw * 65536 / (2*M_PI);
-#if 1
-	freqw16 = 65536 * Ftune;
-	fprintf(stderr, "DEBUG: FORCE COARSE %f\n", freqw16*Fm/65536);
+#else
+	fprintf(stderr, "Ignoring coarse det, using %f\n", freqw16*Fm/65536);
 #endif
 	enter_frame_search();
       }
@@ -522,7 +521,7 @@ namespace leansdr {
       int nsymbols = MAX_SYMBOLS_PER_FRAME;  // TBD Adjust after PLS decoding
 
       sampler_state ss = { in.rd(), mu, phase16, freqw16 };
-      sampler->update_freq(ss.fw16);
+      sampler->update_freq(ss.fw16/omega);
 
       if ( ! in_power ) init_agc(ss.p, 64);
       update_agc();
@@ -616,7 +615,7 @@ namespace leansdr {
       phase16 -= 65536*floor(phase16/65536);
 
       sampler_state ss = { in.rd(), mu, phase16, freqw16, scrambling.Rn };
-      sampler->update_freq(ss.fw16);
+      sampler->update_freq(ss.fw16/omega);
 
       update_agc();
 
@@ -807,7 +806,7 @@ namespace leansdr {
       if ( psymbols ) symbols_out->written(psymbols-symbols_out->wr());
 #endif
       if ( meas_count >= meas_decimation ) {
-	opt_write(freq_out, freqw16/65536);
+	opt_write(freq_out, freqw16/65536/omega);
 	opt_write(ss_out, in_power);
 	// TBD Adjust if cfg.strongpls
 	float mer = ev_power ? (float)cstln_amp*cstln_amp/ev_power : 1;
