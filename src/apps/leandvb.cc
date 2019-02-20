@@ -51,6 +51,7 @@ struct config {
   } input_format;
   float float_scale;   // Scaling factor for float data.
   bool loop_input;
+  int input_pipe;      // Resize stdin pipe, or 0
   int input_buffer;    // Extra input buffer size
   int buf_factor;      // Buffer sizing
   float Fs;            // Sampling frequency (Hz) 
@@ -102,6 +103,7 @@ struct config {
       input_format(INPUT_U8),
       float_scale(1.0),
       loop_input(false),
+      input_pipe(0),
       input_buffer(0),
       buf_factor(4),
       Fs(2.4e6),
@@ -248,6 +250,19 @@ struct runtime_common {
     unsigned long BUF_SLOW = cfg.buf_factor;
 
     // INPUT
+
+    if ( cfg.input_pipe ) {
+      if ( fcntl(0, F_SETPIPE_SZ, cfg.input_pipe) < 0 ) {
+	if ( errno == EBADF )
+	  fprintf(stderr, "--inpipe: Standard input is not a pipe\n");
+	else
+	  perror("--inpipe");
+	if ( errno == EPERM )
+	  fprintf(stderr, "Try 'echo %d > /proc/sys/fs/pipe-max-size'\n",
+		  cfg.input_pipe);
+	exit(1);
+      }
+    }
 
     p_rawiq = new pipebuf<cf32>(sch, "rawiq", BUF_BASEBAND);
 
@@ -1306,6 +1321,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --f32          Input format is 32-bit float (gqrx)\n"
      "  -f HZ          Input sample rate (Hz, default: 2.4e6)\n"
      "  --loop         Repeat (stdin must be a file)\n"
+     "  --inpipe INT   Resize stdin pipe (bytes)\n"
      "  --inbuf INT    Additional input buffering (samples)\n"
      );
   fprintf
@@ -1513,6 +1529,8 @@ int main(int argc, const char *argv[]) {
       cfg.float_scale = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--loop") )
       cfg.loop_input = true;
+    else if ( ! strcmp(argv[i], "--inpipe")  && i+1<argc )
+      cfg.input_pipe = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--inbuf")  && i+1<argc )
       cfg.input_buffer = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--buf-factor")  && i+1<argc )
