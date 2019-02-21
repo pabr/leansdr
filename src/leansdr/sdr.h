@@ -696,12 +696,14 @@ namespace leansdr {
   public:
     void dump(FILE *f) {
       int bps = log2(nsymbols);
-      fprintf(f, "P5\n%d %d\n255\n", R, R*bps);
-      for ( int bit=0; bit<bps; ++bit ) {
+      fprintf(f, "P5\n%d %d\n255\n", R, R*(bps+1));
+      for ( int bit=0; bit<bps+1; ++bit ) {
 	for ( int Q=R/2-1; Q>=-R/2; --Q )
 	  for ( int I=-R/2; I<R/2; ++I ) {
 	    result *pr = &lut[I&(R-1)][Q&(R-1)];
-	    uint8_t v = softsymb_to_dump(pr->ss, bit);
+	    uint8_t v;
+	    if ( bit < bps) v = softsymb_to_dump(pr->ss, bit);
+	    else            v = 128 + pr->phase_error/64;
 	    // Highlight the constellation symbols.
 	    for ( int s=0; s<nsymbols; ++s ) {
 	      if ( symbols[s].re==I && symbols[s].im==Q ) v ^= 128;
