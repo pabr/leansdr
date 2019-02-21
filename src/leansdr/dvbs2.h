@@ -1940,6 +1940,7 @@ namespace leansdr {
 		pls->modcod, pls->sf);
       int tx[2], rx[2];
       if ( pipe(tx) || pipe(rx) ) fatal("pipe");
+      // Size the pipes so that the helper never runs out of work to do.
       int pipesize = 64800 * batch_size;
       if ( fcntl(tx[0], F_SETPIPE_SZ, pipesize) < 0 ||
 	   fcntl(rx[0], F_SETPIPE_SZ, pipesize) < 0 ||
@@ -1950,7 +1951,7 @@ namespace leansdr {
 		"*** Failed to increase pipe size.\n"
 		"*** Try echo %d > /proc/sys/fs/pipe-max-size\n"
 		"***\n", pipesize);
-	fprintf(stderr, "\n");
+	exit(1);
       }
       int child = vfork();
       if ( ! child ) {
