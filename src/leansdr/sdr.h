@@ -774,6 +774,7 @@ namespace leansdr {
 	shifted_coeffs(new complex<T>[ncoeffs]),
 	update_freq_phase(0)
     {
+      do_update_freq(0);  // In case application never calls update_freq()
     }
 
     int readahead() { return ncoeffs-1; }
@@ -937,7 +938,7 @@ namespace leansdr {
 	  if ( mu < 1 ) {
 	    // Here 0<=mu<1 is the fractional time of the next symbol
 	    // between pin and pin+1.
-	    sg = sampler->interp(pin, mu, phase);
+	    sg = sampler->interp(pin, mu, phase+mu*freqw);
 	    s = sg * agc_gain;
 	    
 	    // Constellation look-up
