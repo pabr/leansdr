@@ -707,6 +707,7 @@ int run_dvbs2(config &cfg) {
 					 cfg.ldpc_helper,
 					 run.p_vbitcount, run.p_verrcount);
     r_fecdec->nhelpers = cfg.nhelpers;
+    r_fecdec->must_buffer = (cfg.nhelpers>1) || (cfg.input_pipe>0);
   }
 
   // Deframe BB frames to TS packets

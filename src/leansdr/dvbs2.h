@@ -1846,6 +1846,7 @@ namespace leansdr {
   struct s2_fecdec_helper : runnable {
     int batch_size;
     int nhelpers;
+    bool must_buffer;
     s2_fecdec_helper(scheduler *sch,
 		     pipebuf< fecframe<SOFTBYTE> > &_in,
 		     pipebuf<bbframe> &_out,
@@ -1855,6 +1856,7 @@ namespace leansdr {
       : runnable(sch, "S2 fecdec io"),
 	batch_size(32),
 	nhelpers(1),
+	must_buffer(false),
 	in(_in), out(_out),
 	command(_command),
 	bitcount(opt_writer(_bitcount,1)),
@@ -1947,11 +1949,12 @@ namespace leansdr {
 	   fcntl(tx[1], F_SETPIPE_SZ, pipesize) < 0 ||
 	   fcntl(rx[1], F_SETPIPE_SZ, pipesize) < 0 ) {
 	fprintf(stderr,
-		"***\n"
 		"*** Failed to increase pipe size.\n"
-		"*** Try echo %d > /proc/sys/fs/pipe-max-size\n"
-		"***\n", pipesize);
-	exit(1);
+		"*** Try echo %d > /proc/sys/fs/pipe-max-size\n", pipesize);
+	if ( must_buffer )
+	  fatal("F_SETPIPE_SZ");
+	else
+	  fprintf(stderr, "*** Throughput will be suboptimal.\n");
       }
       int child = vfork();
       if ( ! child ) {
