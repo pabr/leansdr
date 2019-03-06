@@ -750,7 +750,7 @@ namespace leansdr {
 	  if ( psymbols )
 	    *psymbols++ = p * scale_symbols;
 #endif
-#if 0 || TEST_DIVERSITY
+#if 1 || TEST_DIVERSITY
 	  (void)track_symbol(&ss, p, cstln, 0);  // SLOW
 #endif
 	  complex<float> d = descramble(&ss, p);
@@ -909,8 +909,8 @@ namespace leansdr {
     inline uint8_t track_symbol(sampler_state *ss, const complex<float> &p,
 				cstln_lut<SOFTSYMB,256> *c, int mode) {
       static struct { float kph, kfw, kmu; } gains[2] = {
-	{ 4e-4, 6e-6, 0.04/(cstln_amp*cstln_amp) },
-	{ 4e-4, 6e-6, 0.04/(cstln_amp*cstln_amp) }
+	{ 4e-2, 1e-4, 0.001/(cstln_amp*cstln_amp) },
+	{ 4e-2, 1e-4, 0.001/(cstln_amp*cstln_amp) }
       };
       // Decision
       typename cstln_lut<SOFTSYMB,256>::result *cr = c->lookup(p.re, p.im);
