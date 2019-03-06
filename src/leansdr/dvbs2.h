@@ -556,6 +556,7 @@ namespace leansdr {
 	    return;
 	  }
 	}
+	ss.normalize();
       }
 
       // Write back sampler progress
@@ -586,6 +587,9 @@ namespace leansdr {
 	ph16 += fw16 * ns;
 	scr += ns;
       }
+      void normalize() {
+	ph16 = fmodf(ph16, 65536.0f);  // Rounding direction irrelevant
+      }
     };
 
 #define xfprintf(...) {}
@@ -610,9 +614,6 @@ namespace leansdr {
 
       xfprintf(stderr, "lock0step fw= %f (%.0f Hz) mu=%f\n",
 	      freqw16, freqw16*Fm/65536, mu);
-
-      // Preserve float precision
-      phase16 -= 65536*floor(phase16/65536);
 
       sampler_state ss = { in.rd(), mu, phase16, freqw16, scrambling.Rn };
       sampler->update_freq(ss.fw16/omega);
@@ -651,6 +652,7 @@ namespace leansdr {
       // Adjust phase with PLS
       complex<float> pls_corr = conjprod(plscodes.symbols[pls_index],
 					 pls_symbols, plscodes.LENGTH);
+      ss.normalize();
       align_phase(&ss, pls_corr);
 
       s2_pls pls;
@@ -735,6 +737,7 @@ namespace leansdr {
 	    return;
 	  }
 	  pilot_errors += errors;
+	  ss.normalize();
 	  align_phase(&ss, corr);
 	  till_next_pls = 16;
 	}
@@ -787,6 +790,7 @@ namespace leansdr {
 	enter_coarse_freq();
 	return;
       }
+      ss.normalize();
       align_phase(&ss, sof_corr);
 
       // Commit whole frame after final SOF.
