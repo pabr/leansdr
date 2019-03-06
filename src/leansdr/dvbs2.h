@@ -356,8 +356,6 @@ namespace leansdr {
 
   // S2 FRAME RECEIVER
 
-  static int pl_errors=0, pl_symbols=0;
-
 #define TEST_DIVERSITY 0
 
   template<typename T, typename SOFTSYMB>
@@ -826,12 +824,6 @@ namespace leansdr {
 	       "errors=%d/64+%d+%d/26 = %2d/%d\n",
 	       freqw16, freqw16*Fm/65536, mu,
 	       pls_errors, pilot_errors, sof_errors, all_errors, max_errors);
-      pl_errors += all_errors;
-      pl_symbols += max_errors;
-    }
-
-    void shutdown() {
-      fprintf(stderr, "PL SER: %f ppm\n", pl_errors/(pl_symbols+1e-6)*1e6);
     }
 
     void init_agc(const complex<T> *buf, int n) {
