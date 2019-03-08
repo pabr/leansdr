@@ -714,6 +714,13 @@ int run_dvbs2(config &cfg) {
   s2_deframer deframer(run.sch, p_bbframes, *run.p_tspackets,
 		       run.p_lock, run.p_locktime);
 
+  if ( cfg.debug )
+    fprintf(stderr,
+	    "Output:\n"
+	    "  '_': S2 frame received without errors\n"
+	    "  '.': error-corrected S2 frame\n"
+	      "  '!': S2 frame with remaining errors\n");
+
   run.sch->run();
   fprintf(stderr, "sch stopped\n");
   run.sch->shutdown();
@@ -929,9 +936,9 @@ int run_dvbs(config &cfg) {
     if ( ! cfg.hdlc )
       fprintf(stderr,
 	      "Output:\n"
-	      "  '_': packet received without errors\n"
-	      "  '.': error-corrected packet\n"
-	      "  '!': packet with remaining errors\n");
+	      "  '_': TS packet received without errors\n"
+	      "  '.': error-corrected TS packet\n"
+	      "  '!': TS packet with remaining errors\n");
     else
       fprintf(stderr,
 	      "Output:\n"
