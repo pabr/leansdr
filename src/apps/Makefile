@@ -32,7 +32,7 @@ ifneq "$(wildcard /usr/include/X11/Xlib.h)" ""
 $(OUTDIR)/leandvb:	CXXFLAGS_APP=-DGUI
 $(OUTDIR)/leandvb:	LDFLAGS_APP=-lX11
 else
-$(info libX11 not found. Will not support --gui).
+$(info libX11 not found. Will not support --gui.)
 endif
 
 # leanmlmrx requires fftw3 and pthread.
