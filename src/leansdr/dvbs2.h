@@ -170,6 +170,7 @@ namespace leansdr {
     bool sf;
     bool pilots;
     int framebits() const { return sf ? 16200 : 64800; }
+    bool is_dummy() { return (modcod==0); }
   };
 
   template<typename SOFTSYMB>
@@ -590,9 +591,6 @@ namespace leansdr {
       }
     };
 
-#define xfprintf(...) {}
-    //#define xfprintf fprintf
-
     void run_frame_locked() {
       complex<float> *psampled;
       if ( cstln_out && cstln_out->writable()>=1024 )
@@ -609,9 +607,6 @@ namespace leansdr {
       complex<float> *psymbols = symbols_out ? symbols_out->wr() : NULL;
       float scale_symbols = 1.0 / cstln_amp;
 #endif
-
-      xfprintf(stderr, "lock0step fw= %f (%.0f Hz) mu=%f\n",
-	      freqw16, freqw16*Fm/65536, mu);
 
       sampler_state ss = { in.rd(), mu, phase16, freqw16, scrambling.Rn };
       sampler->update_freq(ss.fw16/omega);
@@ -657,56 +652,66 @@ namespace leansdr {
       pls.modcod = pls_index >> 2;  // Guaranteed 0..31
       pls.sf = pls_index & 2;
       pls.pilots = pls_index & 1;
-      xfprintf(stderr, "PLS: modcod %d, short=%d, pilots=%d (%d errors)\n",
-	       pls.modcod, pls.sf, pls.pilots, pls_errors);
-      const modcod_info *mcinfo = &modcod_infos[pls.modcod];
-      if ( ! mcinfo->nslots_nf ) {
-	fprintf(stderr, "Unsupported or corrupted MODCOD\n");
-	in.read(ss.p-in.rd());
-	enter_frame_search();
-	return;
-      }
-#if 1   // TBD use fec_infos
-      if ( pls.sf && mcinfo->rate==FEC910 ) {
-	fprintf(stderr, "Unsupported or corrupted FEC\n");
-	in.read(ss.p-in.rd());
-	enter_frame_search();
-	return;
-      }
-#endif
-
-      // TBD Comparison of nsymbols is insufficient for DVB-S2X.
-      if ( !cstln || cstln->nsymbols!=mcinfo->nsymbols ) {
-	if ( cstln ) {
-	  fprintf(stderr, "Warning: Variable MODCOD is inefficient\n");
-	  delete cstln;
-	}
-	fprintf(stderr, "Creating LUT for %s ratecode %d\n",
-		cstln_base::names[mcinfo->c], mcinfo->rate);
-	cstln = new cstln_lut<SOFTSYMB,256>(mcinfo->c, mcinfo->esn0_nf,
-					    mcinfo->g1,mcinfo->g2,mcinfo->g3);
-#if 0
-	fprintf(stderr, "Dumping constellation LUT to stdout.\n");
-	cstln->dump(stdout);
-	exit(0);
-#endif
-      }
-
-      int S = pls.sf ? mcinfo->nslots_nf/4 : mcinfo->nslots_nf;
+      if  ( sch->debug2 )
+	fprintf(stderr, "PLS: modcod %2d, short=%d, pilots=%d (%2d errors)... ",
+		pls.modcod, pls.sf, pls.pilots, pls_errors);
 
       plslot<SOFTSYMB> *pout=out.wr(), *pout0=pout;
 
-      // Output special slot with PLS information
-      pout->is_pls = true;
-      pout->pls = pls;
-      ++pout;
+      // Determine contents of frame.
+
+      int S;                            // Data slots in this frame
+      int till_next_pls;                // Slots until next pilot or SOF
+      cstln_lut<SOFTSYMB,256> *dcstln;  // Constellation for data slots
+
+      if ( pls.is_dummy() ) {
+	S = 36;
+	till_next_pls = S;
+	dcstln = qpsk;
+      } else {
+	const modcod_info *mcinfo = &modcod_infos[pls.modcod];
+	if ( ! mcinfo->nslots_nf ) {
+	  fprintf(stderr, "Unsupported or corrupted MODCOD\n");
+	  in.read(ss.p-in.rd());
+	  enter_frame_search();
+	  return;
+	}
+	if ( pls.sf && mcinfo->rate==FEC910 ) {  // TBD use fec_infos
+	  fprintf(stderr, "Unsupported or corrupted FEC\n");
+	  in.read(ss.p-in.rd());
+	  enter_frame_search();
+	  return;
+	}
+	S = pls.sf ? mcinfo->nslots_nf/4 : mcinfo->nslots_nf;
+	till_next_pls = pls.pilots ? 16 : S;
+	// Constellation for data slots.
+	// TBD Comparison of nsymbols is insufficient for DVB-S2X.
+	if ( !cstln || cstln->nsymbols!=mcinfo->nsymbols ) {
+	  if ( cstln ) {
+	    fprintf(stderr, "Warning: Variable MODCOD is inefficient\n");
+	    delete cstln;
+	  }
+	  if ( sch->debug )
+	    fprintf(stderr, "Creating LUT for %s ratecode %d\n",
+		    cstln_base::names[mcinfo->c], mcinfo->rate);
+	  cstln = new cstln_lut<SOFTSYMB,256>(mcinfo->c, mcinfo->esn0_nf,
+					      mcinfo->g1,mcinfo->g2,mcinfo->g3);
+#if 0
+	  fprintf(stderr, "Dumping constellation LUT to stdout.\n");
+	  cstln->dump(stdout);
+	  exit(0);
+#endif
+	}
+	dcstln = cstln;
+	// Output special slot with PLS information.
+	pout->is_pls = true;
+	pout->pls = pls;
+	++pout;
+      }
 
       // Read slots and pilots
 
       int pilot_errors = 0;
-
-      // Slots to skip until next PL slot (pilot or sof)
-      int till_next_pls = pls.pilots ? 16 : S;
 
       for ( int slots=S; slots--; ++pout,--till_next_pls ) {
 	if ( till_next_pls == 0 ) {
@@ -749,13 +754,13 @@ namespace leansdr {
 	    *psymbols++ = p * scale_symbols;
 #endif
 #if 1 || TEST_DIVERSITY
-	  (void)track_symbol(&ss, p, cstln, 0);  // SLOW
+	  (void)track_symbol(&ss, p, dcstln, 0);  // SLOW
 #endif
 	  complex<float> d = descramble(&ss, p);
 #if 0  // Slow
-	  SOFTSYMB *symb = &cstln->lookup(d.re, d.im)->ss;
+	  SOFTSYMB *symb = &dcstln->lookup(d.re, d.im)->ss;
 #else  // Avoid scaling floats. May wrap at very low SNR.
-	  SOFTSYMB *symb = &cstln->lookup((int)d.re, (int)d.im)->ss;
+	  SOFTSYMB *symb = &dcstln->lookup((int)d.re, (int)d.im)->ss;
 #endif
 	  pout->symbols[s] = *symb;
 	}
@@ -792,7 +797,8 @@ namespace leansdr {
       align_phase(&ss, sof_corr);
 
       // Commit whole frame after final SOF.
-      out.written(pout-pout0);
+      if ( ! pls.is_dummy() )
+	out.written(pout-pout0);
 
       // Write back sampler progress
       meas_count += ss.p - in.rd();
@@ -820,10 +826,9 @@ namespace leansdr {
       int max_errors = plscodes.LENGTH + sof.LENGTH;
       if ( pls.pilots ) max_errors += ((S-1)/16) * pilot_length;
 
-      xfprintf(stderr, "success   fw= %f (%.0f Hz) mu= %f "
-	       "errors=%d/64+%d+%d/26 = %2d/%d\n",
-	       freqw16, freqw16*Fm/65536, mu,
-	       pls_errors, pilot_errors, sof_errors, all_errors, max_errors);
+      if ( sch->debug2 )
+	fprintf(stderr, "errors=%d/64+%d+%d/26 = %d/%d\n",
+		pls_errors, pilot_errors, sof_errors, all_errors, max_errors);
     }
 
     void init_agc(const complex<T> *buf, int n) {
@@ -987,7 +992,6 @@ namespace leansdr {
     }
 
     trig16 trig;
-    modcod_info *mcinfo;
     pipereader< complex<T> > in;
     pipewriter< plslot<SOFTSYMB> > out;
     int meas_count;
