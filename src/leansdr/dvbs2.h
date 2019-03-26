@@ -2105,10 +2105,12 @@ namespace leansdr {
   // EN 302 307-1 section 5.1 Mode adaptation
 
   struct s2_deframer : runnable {
+    int fd_gse;  // FD for generic streams, or -1
     s2_deframer(scheduler *sch, pipebuf<bbframe> &_in, pipebuf<tspacket> &_out,
 		pipebuf<int> *_state_out=NULL,
 		pipebuf<unsigned long> *_locktime_out=NULL)
       : runnable(sch, "S2 deframer"),
+	fd_gse(-1),
 	missing(-1),
 	in(_in), out(_out,MAX_TS_PER_BBFRAME),
 	current_state(false),
@@ -2133,6 +2135,14 @@ namespace leansdr {
   private:
     void run_bbframe(bbframe *pin) {
       uint8_t *bbh = pin->bytes;
+      // EN 302 307 section 5.1.6 Base-Band Header Insertion
+      uint8_t streamtype = bbh[0] >> 6;
+      bool sis = bbh[0] & 32;
+      bool ccm = bbh[0] & 16;
+      bool issyi = bbh[0] & 8;
+      bool npd = bbh[0] & 4;
+      int ro_code = bbh[0] & 3;
+      uint8_t isi = bbh[1];  // if !sis
       uint16_t upl = (bbh[2]<<8) | bbh[3];
       uint16_t dfl = (bbh[4]<<8) | bbh[5];
       uint8_t sync = bbh[6];
@@ -2140,22 +2150,42 @@ namespace leansdr {
       uint8_t crcexp = crc8.compute(bbh, 9);
       uint8_t crc = bbh[9];
       uint8_t *data = bbh + 10;
-      int ro_code = bbh[0] & 3;
       if ( sch->debug2 ) {
+	static const char *stnames[] = { "GP", "GC", "??", "TS" };
 	static float ro_values[] = { 0.35, 0.25, 0.20, 0 };
-	fprintf(stderr, "BBH: crc %02x/%02x %s ma=%02x%02x ro=%.2f"
+	fprintf(stderr, "BBH: crc %02x/%02x(%s) %s %s(ISI=%d) %s%s%s ro=%.2f"
 		" upl=%d dfl=%d sync=%02x syncd=%d\n",
 		crc, crcexp, (crc==crcexp)?"OK":"KO",
-		bbh[0], bbh[1], ro_values[ro_code], upl, dfl, sync, syncd);
+		stnames[streamtype], (sis?"SIS":"MIS"), isi,
+		(ccm?"CCM":"ACM"), (issyi?" ISSYI":""), (npd?" NPD":""),
+		ro_values[ro_code],
+		upl, dfl, sync, syncd);
       }
-      if ( crc!=crcexp || upl!=188*8 || sync!=0x47 || dfl>fec_info::KBCH_MAX ||
-	   syncd>dfl || (dfl&7) || (syncd&7) ) {
+      if ( crc!=crcexp || dfl>fec_info::KBCH_MAX ) {
 	// Note: Maybe accept syncd=65535
 	fprintf(stderr, "Bad bbframe\n");
 	missing = -1;
 	info_unlocked();
 	return;
       }
+      // TBD: Supporting byte-oriented payloads only.
+      if ( (dfl&7) || (syncd&7) ) {
+	fprintf(stderr, "Unsupported bbframe\n");
+	missing = -1;
+	info_unlocked();
+	return;
+      }
+      if ( streamtype==3 && upl==188*8 && sync==0x47 && syncd<=dfl)
+	handle_ts(data, dfl, syncd, sync);
+      else if ( streamtype == 1 ) {
+	if ( fd_gse >= 0 ) {
+	  ssize_t nw = write(fd_gse, data, dfl/8);
+	  if ( nw < 0 ) fatal("write(gse)");
+	  if ( nw != dfl/8 ) fail("partial write(gse");
+	}
+      }
+    }
+    void handle_ts(uint8_t *data, uint16_t dfl, uint16_t syncd, uint8_t sync) {
       // TBD Handle packets as payload+finalCRC and do crc8 before pout
       int pos;  // Start of useful data in this bbframe
       if ( missing < 0 ) {
