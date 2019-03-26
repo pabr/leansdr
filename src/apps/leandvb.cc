@@ -671,6 +671,19 @@ int run_dvbs2(config &cfg) {
   demod.meas_decimation = decimation(cfg.Fm, cfg.Finfo);
   demod.strongpls = cfg.strongpls;
 
+  if ( cfg.fd_const ) {
+    file_carrayprinter<f32> *symbol_printer;
+    if ( cfg.json )
+      symbol_printer = new file_carrayprinter<f32>
+	(run.sch, "SYMBOLS [", "[%.0f,%.0f]", ",", "]\n",
+	 *run.p_cstln, cfg.fd_const);
+    else
+      symbol_printer =  new file_carrayprinter<f32>
+	(run.sch, "SYMBOLS %d", " %.0f,%.0f", "", "\n",
+	 *run.p_cstln, cfg.fd_const);
+    symbol_printer->fixed_size = 128;
+  }
+
 #ifdef GUI
   if ( run.r_scope_cstln )
     run.r_scope_cstln->cstln = (cstln_base**)&demod.cstln;  // TBD variance
@@ -719,7 +732,7 @@ int run_dvbs2(config &cfg) {
 	    "Output:\n"
 	    "  '_': S2 frame received without errors\n"
 	    "  '.': error-corrected S2 frame\n"
-	      "  '!': S2 frame with remaining errors\n");
+	    "  '!': S2 frame with remaining errors\n");
 
   run.sch->run();
   fprintf(stderr, "sch stopped\n");
