@@ -194,6 +194,12 @@ s2_ft 26 "32APSK_5/6"   14.28
 s2_ft 27 "32APSK_8/9"   15.69
 s2_ft 28 "32APSK_9/10"  16.05
 
+# S2 VCM
+test_series "S2VCM_FT_NF_QPSK12_8PSK23" 4 25 "$S2TX --modcod 4 --nextvcm --modcod 13" "$S2RX"
+test_series "S2VCM_FT_NF_QPSK12_16APSK34" 4 30 "$S2TX --modcod 4 --nextvcm --modcod 19" "$S2RX"
+# S2 VCM, FEC-dependent radii
+test_series "S2VCM_FT_NF_16APSK23_16APSK910" 4 30 "$S2TX --modcod 18 --nextvcm --modcod 23" "$S2RX"
+
 # DVB-S error performance
 
 test_series "1.2sps-hs" 6/5 "20 19 18 17 16 15 14 13 12 11 10" "" "--u8 --hs"

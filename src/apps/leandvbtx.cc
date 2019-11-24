@@ -60,7 +60,9 @@ struct config {
   cstln_base::predef constellation;
   code_rate fec;
   // DVB-S2
-  s2_pls pls;
+  static const int MAX_PLS_SEQ = 256;
+  s2_pls pls_seq[MAX_PLS_SEQ];
+  int n_pls_seq;
   // Common
   int buf_factor;
   float amp;       // Desired RMS constellation amplitude
@@ -73,7 +75,7 @@ struct config {
   bool fill;
   bool verbose, debug;
   config()
-    : standard(DVB_S), constellation(cstln_base::QPSK), fec(FEC12),
+    : standard(DVB_S),
       buf_factor(2),
       amp(1.0f), agc(false),
       interp(2), decim(1), rolloff(0.35), rrc_rej(10),
@@ -81,9 +83,14 @@ struct config {
       fill(false),
       verbose(false), debug(false)
   {
-    pls.modcod = 13;  // 8PSK 2/3
-    pls.sf = false;
-    pls.pilots = false;
+    // DVB-S defaults
+    constellation = cstln_base::QPSK;
+    fec = FEC12;
+    // DVB-S2 defaults
+    pls_seq[0].modcod = 13;  // 8PSK 2/3
+    pls_seq[0].sf = false;
+    pls_seq[0].pilots = false;
+    n_pls_seq = 1;  // CCM
   }
 };
     
@@ -234,7 +241,8 @@ void run_dvbs2(config &cfg) {
 
   pipebuf<bbframe> p_bbframes(&sch, "Scr BB frames", BUF_FRAMES);
   s2_framer r_framer(&sch, p_tspackets, p_bbframes);
-  r_framer.pls = cfg.pls;
+  r_framer.pls_seq = cfg.pls_seq;
+  r_framer.n_pls_seq = cfg.n_pls_seq;
   if      ( cfg.rolloff > 0.40 )  r_framer.rolloff_code = 3;
   else if ( cfg.rolloff > 0.30 )  r_framer.rolloff_code = 0;  // 0.35
   else if ( cfg.rolloff > 0.225 ) r_framer.rolloff_code = 1;  // 0.25
@@ -354,6 +362,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --modcod INT      Set DVB-S2 modcod number\n"
      "  --shortframes     Generate short frames\n"
      "  --pilots          Generate pilots\n"
+     "  --nextvcm         Move to new frame spec in repeating VCM pattern\n"
      "  -f INTERP[/DECIM] Samples per symbols (default: 2)\n"
      "  --roll-off FLOAT  RRC roll-off (default: 0.35)\n"
      "  --rrc-rej FLOAT   RRC filter rejection (defaut: 10)\n"
@@ -417,11 +426,16 @@ int main(int argc, char *argv[]) {
 	usage(argv[0], stderr, 1, argv[i]);
     }
     else if ( ! strcmp(argv[i], "--modcod") && i+1<argc )
-      cfg.pls.modcod = atoi(argv[++i]);
+      cfg.pls_seq[cfg.n_pls_seq-1].modcod = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--shortframes") )
-      cfg.pls.sf = true;
+      cfg.pls_seq[cfg.n_pls_seq-1].sf = true;
     else if ( ! strcmp(argv[i], "--pilots") )
-      cfg.pls.pilots = true;
+      cfg.pls_seq[cfg.n_pls_seq-1].pilots = true;
+    else if ( ! strcmp(argv[i], "--nextvcm") ) {
+      if ( cfg.n_pls_seq == cfg.MAX_PLS_SEQ ) fail("VCM sequence too long");
+      cfg.pls_seq[cfg.n_pls_seq] = cfg.pls_seq[cfg.n_pls_seq-1];
+      ++cfg.n_pls_seq;
+    }
     else if ( ! strcmp(argv[i], "-f") && i+1<argc ) {
       ++i;
       cfg.decim = 1;

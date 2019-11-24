@@ -267,6 +267,8 @@ namespace leansdr {
       qsymbols[1].re = +amp; qsymbols[1].im = -amp;
       qsymbols[2].re = -amp; qsymbols[2].im = +amp;
       qsymbols[3].re = -amp; qsymbols[3].im = -amp;
+      // Clear the constellation cache.
+      for ( int i=0; i<32; ++i ) pcsymbols[i] = NULL;
     }
     void run() {
       while ( in.readable() >= 1 ) {
@@ -280,7 +282,6 @@ namespace leansdr {
 	int nsymbols = ( (1+nslots) * plslot<hard_ss>::LENGTH +
 			 (pls->pilots ? ((nslots-1)/16)*pilot_length : 0) );
 	if ( out.writable() < nsymbols ) break;
-	update_cstln(mcinfo);
 	int nw = run_frame(pls, mcinfo, pin+1, nslots, out.wr());
 	if ( nw != nsymbols ) fail("Bug: s2_frame_transmitter overflow");
 	in.read(1+nslots);
@@ -298,6 +299,7 @@ namespace leansdr {
       int pls_index = (pls->modcod<<2) | (pls->sf<<1) | pls->pilots;
       memcpy(pout, plscodes.symbols[pls_index], plscodes.LENGTH*sizeof(*pout));
       pout += plscodes.LENGTH;
+      complex<T> *csymbols = get_csymbols(pls->modcod);
       // Slots and pilots
       int till_next_pilot = pls->pilots ? 16 : nslots;
       uint8_t *scr = &scrambling.Rn[0];
@@ -327,26 +329,23 @@ namespace leansdr {
   private:
     pipereader< plslot<hard_ss> > in;
     pipewriter< complex<T> > out;
-    cstln_lut<hard_ss,256> *cstln;  // NULL initially
-    complex<T> *csymbols;           // Valid iff cstln is valid. RMS cstln_amp.
-    void update_cstln(const modcod_info *mcinfo) {
-      if ( !cstln || cstln->nsymbols!=mcinfo->nsymbols ) {
-	if ( cstln ) {
-	  fprintf(stderr, "Warning: Variable MODCOD is inefficient\n");
-	  delete cstln;
-	  delete csymbols;
-	}
+    complex<T> *pcsymbols[32];  // Constellations in use, indexed by modcod
+    complex<T> *get_csymbols(int modcod) {
+      if ( ! pcsymbols[modcod] ) {
+	const modcod_info *mcinfo = check_modcod(modcod);
 	if ( sch->debug )
-	  fprintf(stderr, "Building constellation %d\n", mcinfo->nsymbols);
+	  fprintf(stderr, "Building constellation %s ratecode %d\n",
+		  cstln_base::names[mcinfo->c], mcinfo->rate);
 	// TBD Different Es/N0 for short frames ?
-	cstln = new cstln_lut<hard_ss,256>(mcinfo->c, mcinfo->esn0_nf,
-					   mcinfo->g1, mcinfo->g2, mcinfo->g3);
-	csymbols = new complex<T>[cstln->nsymbols];
-	for ( int s=0; s<cstln->nsymbols; ++s ) {
-	  csymbols[s].re = cstln->symbols[s].re;
-	  csymbols[s].im = cstln->symbols[s].im;
+	cstln_lut<hard_ss,256> cstln(mcinfo->c, mcinfo->esn0_nf,
+				     mcinfo->g1, mcinfo->g2, mcinfo->g3);
+	pcsymbols[modcod] = new complex<T>[cstln.nsymbols];
+	for ( int s=0; s<cstln.nsymbols; ++s ) {
+	  pcsymbols[modcod][s].re = cstln.symbols[s].re;
+	  pcsymbols[modcod][s].im = cstln.symbols[s].im;
 	}
       }
+      return pcsymbols[modcod];
     }
     complex<T> qsymbols[4];  // RMS cstln_amp
     s2_sof<T> sof;
@@ -403,6 +402,9 @@ namespace leansdr {
       // Constellation for PLS
       qpsk = new cstln_lut<SOFTSYMB,256>(cstln_base::QPSK);
       add_syncs(qpsk);
+
+      // Clear the constellation cache.
+      for ( int i=0; i<32; ++i ) cstlns[i] = NULL;
 
       init_coarse_freq();
 
@@ -685,24 +687,8 @@ namespace leansdr {
 	S = pls.sf ? mcinfo->nslots_nf/4 : mcinfo->nslots_nf;
 	till_next_pls = pls.pilots ? 16 : S;
 	// Constellation for data slots.
-	// TBD Comparison of nsymbols is insufficient for DVB-S2X.
-	if ( !cstln || cstln->nsymbols!=mcinfo->nsymbols ) {
-	  if ( cstln ) {
-	    fprintf(stderr, "Warning: Variable MODCOD is inefficient\n");
-	    delete cstln;
-	  }
-	  if ( sch->debug )
-	    fprintf(stderr, "Creating LUT for %s ratecode %d\n",
-		    cstln_base::names[mcinfo->c], mcinfo->rate);
-	  cstln = new cstln_lut<SOFTSYMB,256>(mcinfo->c, mcinfo->esn0_nf,
-					      mcinfo->g1,mcinfo->g2,mcinfo->g3);
-#if 0
-	  fprintf(stderr, "Dumping constellation LUT to stdout.\n");
-	  cstln->dump(stdout);
-	  exit(0);
-#endif
-	}
-	dcstln = cstln;
+	dcstln = get_cstln(pls.modcod);
+	cstln = dcstln;  // Still used by AGC (when strongpls) and GUI
 	// Output special slot with PLS information.
 	pout->is_pls = true;
 	pout->pls = pls;
@@ -848,7 +834,7 @@ namespace leansdr {
 	// Match RMS amplitude
 	agc_gain = cstln_amp / in_amp;
       } else {
-	// Match peak amplitude
+	// Match peak amplitude. Note: Assumes CCM.
 	agc_gain = cstln_amp / cstln->amp_max / in_amp;
       }
     }
@@ -960,7 +946,24 @@ namespace leansdr {
     } syncs[MAXSYNCS], *current_sync;
     int nsyncs;
     s2_plscodes<T> plscodes;
-    cstln_lut<SOFTSYMB,256> *cstln;
+    cstln_lut<SOFTSYMB,256> *cstlns[32];  // Constellations in use, by modcod
+    cstln_lut<SOFTSYMB,256> *get_cstln(int modcod) {
+      if ( ! cstlns[modcod] ) {
+	const modcod_info *mcinfo = &modcod_infos[modcod];
+	if ( sch->debug )
+	  fprintf(stderr, "Creating LUT for %s ratecode %d\n",
+		  cstln_base::names[mcinfo->c], mcinfo->rate);
+	cstlns[modcod] = new cstln_lut<SOFTSYMB,256>
+	  (mcinfo->c, mcinfo->esn0_nf, mcinfo->g1,mcinfo->g2,mcinfo->g3);
+#if 0
+	fprintf(stderr, "Dumping constellation LUT to stdout.\n");
+	cstlns[modcod]->dump(stdout);
+	exit(0);
+#endif
+      }
+      return cstlns[modcod];
+    }
+    cstln_lut<SOFTSYMB,256> *cstln;  // Last seen, or NULL (legacy)
     // Initialize synchronizers for an arbitrary constellation.
     void add_syncs(cstln_lut<SOFTSYMB,256> *c) {
       int random_decision = 0;
@@ -2031,32 +2034,44 @@ namespace leansdr {
 
   struct s2_framer : runnable {
     uint8_t rolloff_code;  // 0=0.35, 1=0.25, 2=0.20, 3=reserved
-    s2_pls pls;
+    // User must provide pls_seq[n_pls_seq].
+    // For ACM, user can change pls_seq[0] at runtime.
+    // For VCM with a repeating pattern, use n_pls_seq>=2.
+    s2_pls *pls_seq;
+    int n_pls_seq;
+
     s2_framer(scheduler *sch, pipebuf<tspacket> &_in, pipebuf<bbframe> &_out)
       : runnable(sch, "S2 framer"),
+	n_pls_seq(0),
+	pls_index(0),
 	in(_in), out(_out)
     {
-      pls.modcod = 4;
-      pls.sf = false;
-      pls.pilots = true;
       nremain = 0;
       remcrc = 0;  // CRC for nonexistent previous packet
     }
     void run() {
       while ( out.writable() >= 1 ) {
-	const modcod_info *mcinfo = check_modcod(pls.modcod);
-	const fec_info *fi = &fec_infos[pls.sf][mcinfo->rate];
+	if ( ! n_pls_seq ) fail("PLS not specified");
+	s2_pls *pls = &pls_seq[pls_index];
+	const modcod_info *mcinfo = check_modcod(pls->modcod);
+	const fec_info *fi = &fec_infos[pls->sf][mcinfo->rate];
 	int framebytes = fi->Kbch / 8;
 	if ( ! framebytes ) fail("MODCOD/framesize combination not allowed");
 	if ( 10+nremain+188*in.readable() < framebytes )
 	  break;  // Not enough data to fill a frame
 	bbframe *pout = out.wr();
-	pout->pls = pls;
+	pout->pls = *pls;
 	uint8_t *buf = pout->bytes;
 	uint8_t *end = buf + framebytes;
 	// EN 302 307-1 section 5.1.6 Base-Band Header insertion
 	uint8_t *bbheader = buf;
-	*buf++ = 0xf0 | rolloff_code;  // MATYPE-1: TS, SIS, CCM
+	uint8_t matype1 = 0;
+	matype1 |= 0xc0;  // TS
+	matype1 |= 0x20;  // SIS
+	matype1 |= (n_pls_seq==1) ? 0x10 : 0x00;  // CCM/ACM
+	// TBD ISSY/NPD required for ACM ?
+	matype1 |= rolloff_code;
+	*buf++ = matype1;              // MATYPE-1
 	*buf++ = 0;                    // MATYPE-2
 	uint16_t upl = 188 * 8;
 	*buf++ = upl >> 8;             // UPL MSB
@@ -2089,9 +2104,12 @@ namespace leansdr {
 	}
 	if ( buf != end ) fail("Bug: s2_framer");
 	out.written(1);
+	++pls_index;
+	if ( pls_index == n_pls_seq ) pls_index = 0;
       }
     }
   private:
+    int pls_index;  // Next slot to use in pls_seq
     pipereader<tspacket> in;
     pipewriter<bbframe> out;
     crc8_engine crc8;
