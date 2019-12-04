@@ -1007,11 +1007,6 @@ namespace leansdr {
     // S2 constants
     s2_scrambling scrambling;
     s2_sof<T> sof;
-    // Max size of one frame
-    //    static const int MAX_SLOTS = 360;
-    static const int MAX_SLOTS = 240;  // DEBUG match test signal
-    static const int MAX_SYMBOLS =
-      (1+MAX_SLOTS)*plslot<SOFTSYMB>::LENGTH + ((MAX_SLOTS-1)/16)*pilot_length;
   };  // s2_frame_receiver
 
 
