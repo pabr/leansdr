@@ -419,6 +419,29 @@ namespace leansdr {
       FRAME_LOCKED,
     } state;
 
+    // sampler_state holds the entire state of the PLL.
+    // Useful for looking ahead (e.g. next pilots/SOF) then rewinding.
+
+    struct sampler_state {
+      complex<T> *p;  // Pointer to samples
+      float mu;       // Time of next symbol, counted from p
+      float ph16;     // Carrier phase at next symbol (cycles * 65536)
+      float fw16;     // Carrier frequency (cycles per symbol * 65536)
+      uint8_t *scr;   // Position in scrambling sequence for next symbol
+      struct {
+	complex<float> p;  // Received symbol
+	complex<float> c;  // Matched constellation point
+      } hist[3];      // History for M&M
+      void normalize() {
+	ph16 = fmodf(ph16, 65536.0f);  // Rounding direction irrelevant
+      }
+      void skip_symbols(int ns, float omega) {
+	mu += omega * ns;
+	ph16 += fw16 * ns;
+	scr += ns;
+      }
+    };
+
     float min_freqw16, max_freqw16;
 
     // State during COARSE_FREQ
@@ -426,10 +449,7 @@ namespace leansdr {
     int coarse_count;
 
     // State during FRAME_SEARCH and FRAME_LOCKED
-    float freqw16;    // Carrier frequency initialized by COARSE_FREQ
-    float phase16;    // Estimated phase of carrier at next symbol
-
-    float mu;      // Time to next symbol, in samples
+    sampler_state ss_cache;
     float omega;   // Samples per symbol
 
     void run() {
@@ -461,7 +481,6 @@ namespace leansdr {
     void init_coarse_freq() {
       diffcorr = 0;
       coarse_count = 0;
-      memset(hist, 0, sizeof(hist));
       state = COARSE_FREQ;
     }
 
@@ -472,9 +491,9 @@ namespace leansdr {
     }
 
     void run_frame_coarse() {
-      freqw16 = 65536 * Ftune;
-      min_freqw16 = freqw16 - 65536.0/9;
-      max_freqw16 = freqw16 + 65536.0/9;
+      ss_cache.fw16 = 65536 * Ftune;
+      min_freqw16 = ss_cache.fw16 - 65536.0/9;
+      max_freqw16 = ss_cache.fw16 + 65536.0/9;
 
       complex<T> *pin = in.rd();
       complex<T> p = *pin++;
@@ -492,9 +511,10 @@ namespace leansdr {
 	fprintf(stderr, "COARSE(%d): %f rad/symb (%.0f Hz at %.0f baud)\n",
 		coarse_count, freqw, freqw*Fm/(2*M_PI), Fm);
 #if 0
-	freqw16 = freqw * 65536 / (2*M_PI);
+	ss_cache.fw16 = freqw * 65536 / (2*M_PI);
 #else
-	fprintf(stderr, "Ignoring coarse det, using %f\n", freqw16*Fm/65536);
+	fprintf(stderr, "Ignoring coarse det, using %f\n",
+		ss_cache.fw16*Fm/65536);
 #endif
 	enter_frame_search();
       }
@@ -503,8 +523,9 @@ namespace leansdr {
     // State transtion
     void enter_frame_search() {
       opt_write(state_out, 0);
-      mu = 0;
-      phase16 = 0;
+      ss_cache.mu = 0;
+      ss_cache.ph16 = 0;
+      // ss_cache.fw16 was initialized by frame_coarse.
       if ( sch->debug ) fprintf(stderr, "ACQ\n");
       state = FRAME_SEARCH;
     }
@@ -517,11 +538,14 @@ namespace leansdr {
 	psampled = NULL;
 
       // Preserve float precision
-      phase16 -= 65536*floor(phase16/65536);
+      ss_cache.normalize();
 
       int nsymbols = MAX_SYMBOLS_PER_FRAME;  // TBD Adjust after PLS decoding
 
-      sampler_state ss = { in.rd(), mu, phase16, freqw16 };
+      sampler_state ss = ss_cache;
+      ss.p = in.rd();
+      memset(ss_cache.hist, 0, sizeof(ss_cache.hist));
+
       sampler->update_freq(ss.fw16/omega);
 
       if ( ! in_power ) init_agc(ss.p, 64);
@@ -549,9 +573,7 @@ namespace leansdr {
 		      errors, s, ps->offset16);
 	    ss.ph16 += ps->offset16;
 	    in.read(ss.p-in.rd());
-	    mu = ss.mu;
-	    phase16 = ss.ph16;
-	    freqw16 = ss.fw16;
+	    ss_cache = ss;
 	    if ( psampled ) cstln_out->written(psampled-cstln_out->wr());
 	    enter_frame_locked();
 	    return;
@@ -562,9 +584,7 @@ namespace leansdr {
 
       // Write back sampler progress
       in.read(ss.p-in.rd());
-      mu = ss.mu;
-      phase16 = ss.ph16;
-      freqw16 = ss.fw16;
+      ss_cache = ss;
       if ( psampled ) cstln_out->written(psampled-cstln_out->wr());
     }
 
@@ -575,23 +595,7 @@ namespace leansdr {
       state = FRAME_LOCKED;
     }
 
-  // Note: Starts after SOF
-
-    struct sampler_state {
-      complex<T> *p;  // Pointer to samples
-      float mu;       // Time of next symbol, counted from p
-      float ph16;     // Carrier phase at next symbol, cycles*65536
-      float fw16;     // Carrier frequency, cycles per symbol * 65536
-      uint8_t *scr;   // Position in scrambling sequeence
-      void skip_symbols(int ns, float omega) {
-	mu += omega * ns;
-	ph16 += fw16 * ns;
-	scr += ns;
-      }
-      void normalize() {
-	ph16 = fmodf(ph16, 65536.0f);  // Rounding direction irrelevant
-      }
-    };
+    // Note: Starts after SOF
 
     void run_frame_locked() {
       complex<float> *psampled;
@@ -610,7 +614,9 @@ namespace leansdr {
       float scale_symbols = 1.0 / cstln_amp;
 #endif
 
-      sampler_state ss = { in.rd(), mu, phase16, freqw16, scrambling.Rn };
+      sampler_state ss = ss_cache;
+      ss.p = in.rd();
+      ss.scr = scrambling.Rn;
       sampler->update_freq(ss.fw16/omega);
 
       update_agc();
@@ -755,7 +761,6 @@ namespace leansdr {
 
       // Read SOF
 
-      memset(hist, 0, sizeof(hist));
       complex<float> sof_corr = 0;
       uint32_t sofbits = 0;
       for ( int s=0; s<sof.LENGTH; ++s ) {
@@ -789,9 +794,7 @@ namespace leansdr {
       // Write back sampler progress
       meas_count += ss.p - in.rd();
       in.read(ss.p-in.rd());
-      mu = ss.mu;
-      phase16 = ss.ph16;
-      freqw16 = ss.fw16;
+      ss_cache = ss;
 
       // Measurements
       if ( psampled ) cstln_out->written(psampled-cstln_out->wr());
@@ -800,7 +803,7 @@ namespace leansdr {
       if ( psymbols ) symbols_out->written(psymbols-symbols_out->wr());
 #endif
       if ( meas_count >= meas_decimation ) {
-	opt_write(freq_out, freqw16/65536/omega);
+	opt_write(freq_out, ss_cache.fw16/65536/omega);
 	opt_write(ss_out, in_power);
 	// TBD Adjust if cfg.strongpls
 	float mer = ev_power ? (float)cstln_amp*cstln_amp/ev_power : 1;
@@ -903,17 +906,17 @@ namespace leansdr {
       if ( ss->fw16 < min_freqw16 ) ss->fw16 = min_freqw16;
       if ( ss->fw16 > max_freqw16 ) ss->fw16 = max_freqw16;
       // Phase tracking
-      hist[2] = hist[1];
-      hist[1] = hist[0];
-      hist[0].p = p;
+      ss->hist[2] = ss->hist[1];
+      ss->hist[1] = ss->hist[0];
+      ss->hist[0].p = p;
       complex<int8_t> *cp = &c->symbols[cr->symbol];
-      hist[0].c.re = cp->re;
-      hist[0].c.im = cp->im;
+      ss->hist[0].c.re = cp->re;
+      ss->hist[0].c.im = cp->im;
       float muerr =
-	( (hist[0].p.re-hist[2].p.re)*hist[1].c.re +
-	  (hist[0].p.im-hist[2].p.im)*hist[1].c.im ) -
-	( (hist[0].c.re-hist[2].c.re)*hist[1].p.re +
-	  (hist[0].c.im-hist[2].c.im)*hist[1].p.im );
+	( (ss->hist[0].p.re-ss->hist[2].p.re)*ss->hist[1].c.re +
+	  (ss->hist[0].p.im-ss->hist[2].p.im)*ss->hist[1].c.im ) -
+	( (ss->hist[0].c.re-ss->hist[2].c.re)*ss->hist[1].p.re +
+	  (ss->hist[0].c.im-ss->hist[2].c.im)*ss->hist[1].p.im );
       float mucorr = muerr * gains[mode].kmu;
       const float max_mucorr = 0.1;
       // TBD Optimize out statically
@@ -926,11 +929,6 @@ namespace leansdr {
       ev_power = ev_p*agc_bw + ev_power*(1.0f-agc_bw);
       return cr->symbol;
     }
-
-    struct {
-      complex<float> p;  // Received symbol
-      complex<float> c;  // Matched constellation point
-    } hist[3];
 
   public:
     float in_power, ev_power;
