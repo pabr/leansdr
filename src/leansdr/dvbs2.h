@@ -397,7 +397,8 @@ namespace leansdr {
 	symbols_out(opt_writer(_symbols_out,MAX_SYMBOLS_PER_FRAME)),
 	state_out(opt_writer(_state_out)),
 	report_state(false),
-	scrambling(0)
+	scrambling(0),
+	pls_total_errors(0), pls_total_count(0)
     {
       // Constellation for PLS
       qpsk = new cstln_lut<SOFTSYMB,256>(cstln_base::QPSK);
@@ -649,6 +650,8 @@ namespace leansdr {
 	enter_frame_search();
 	return;
       }
+      pls_total_errors += pls_errors;
+      pls_total_count += plscodes.LENGTH;
 
       // Adjust phase with PLS
       complex<float> pls_corr = conjprod(plscodes.symbols[pls_index],
@@ -724,6 +727,8 @@ namespace leansdr {
 	    corr.re += d.re + d.im;
 	    corr.im += d.im - d.re;
 	  }
+	  pls_total_errors += errors;
+	  pls_total_count += pilot_length;
 	  if ( errors > S2_MAX_ERR_PILOT ) {
 	    if ( sch->debug2 )
 	      fprintf(stderr, "Too many errors in pilot (%d/36)\n", errors);
@@ -777,6 +782,8 @@ namespace leansdr {
 	sof_corr += conjprod(sof.symbols[s], p);
       }
       int sof_errors = hamming_weight(sofbits ^ sof.VALUE);
+      pls_total_errors += sof_errors;
+      pls_total_count += sof.LENGTH;
       if ( sof_errors >= S2_MAX_ERR_SOF ) {
 	if ( sch->debug2 )
 	  fprintf(stderr, "Too many errors in SOF (%d/26)\n", sof_errors);
@@ -818,6 +825,13 @@ namespace leansdr {
       if ( sch->debug2 )
 	fprintf(stderr, "errors=%d/64+%d+%d/26 = %d/%d\n",
 		pls_errors, pilot_errors, sof_errors, all_errors, max_errors);
+    }
+
+    void shutdown() {
+      if ( sch->verbose )
+	fprintf(stderr, "PL errors: %d/%d (%.0f ppm)\n",
+		pls_total_errors, pls_total_count,
+		1e6 * pls_total_errors / pls_total_count);
     }
 
     void init_agc(const complex<T> *buf, int n) {
@@ -1005,6 +1019,8 @@ namespace leansdr {
     // S2 constants
     s2_scrambling scrambling;
     s2_sof<T> sof;
+    // Performance stats on PL signalling
+    uint32_t pls_total_errors, pls_total_count;
   };  // s2_frame_receiver
 
 
