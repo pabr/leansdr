@@ -30,6 +30,7 @@ namespace leansdr {
     complex(T x) : re(x), im(0) { }
     complex(T x, T y) : re(x), im(y) { }
     inline void operator +=(const complex<T> &x) { re+=x.re; im+=x.im; }
+    inline void operator -=(const complex<T> &x) { re-=x.re; im-=x.im; }
     inline void operator *=(const complex<T> &c) {
       T tre = re*c.re - im*c.im;
       im = re*c.im + im*c.re;
@@ -41,6 +42,11 @@ namespace leansdr {
   template<typename T>
   complex<T> operator +(const complex<T> &a, const complex<T> &b) {
     return complex<T>(a.re+b.re, a.im+b.im);
+  }
+
+  template<typename T>
+  complex<T> operator -(const complex<T> &a, const complex<T> &b) {
+    return complex<T>(a.re-b.re, a.im-b.im);
   }
 
   template<typename T>
