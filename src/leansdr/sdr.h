@@ -726,7 +726,7 @@ namespace leansdr {
   template<typename T>
   struct sampler_interface {
     virtual complex<T> interp(const complex<T> *pin, float mu, float phase) = 0;
-    virtual void update_freq(float freqw, int period=1) { }  // 65536 = 1 Hz
+    virtual void update_freq(float freqw, int weight=0) { }  // 65536 = 1 Hz
     virtual int readahead() = 0;
   };
 
@@ -759,7 +759,7 @@ namespace leansdr {
       return s0*(1-mu) + s1*mu;
     }
 
-    void update_freq(float _freqw, int period=1) { freqw = _freqw; }
+    void update_freq(float _freqw, int weight=0) { freqw = _freqw; }
 
   private:
     trig16 trig;
@@ -802,10 +802,11 @@ namespace leansdr {
       return trig.expi(-phase) * acc;
     }
 
-    void update_freq(float freqw, int period) {
+    void update_freq(float freqw, int weight=0) {
+      if ( ! weight ) update_freq_phase = 0;  // Force refresh.
       // Throttling: Update one coeff per 16 processed samples,
       // to keep the overhead of freq tracking below about 10%.
-      update_freq_phase -= period;
+      update_freq_phase -= weight;
       if ( update_freq_phase <= 0  ) {
 	update_freq_phase = ncoeffs*16;
 	do_update_freq(freqw);
