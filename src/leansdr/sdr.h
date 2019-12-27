@@ -563,15 +563,15 @@ namespace leansdr {
       }
       case QAM16:
 	amp_max = 0;
-	make_qam(16);
+	make_qam(16, mer);
 	break;
       case QAM64:
 	amp_max = 1;
-	make_qam(64);
+	make_qam(64, mer);
 	break;
       case QAM256:
 	amp_max = 1;
-	make_qam(256);
+	make_qam(256, mer);
 	break;
       default:
 	fail("Constellation not implemented");
@@ -617,7 +617,7 @@ namespace leansdr {
 					    r*sinf(phi)*cstln_amp);
       }
     }
-    void make_qam(int n) {
+    void make_qam(int n, float mer) {
       nrotations = 4;
       nsymbols = n;
       symbols = new complex<signed char>[nsymbols];
@@ -638,7 +638,7 @@ namespace leansdr {
 	  symbols[s].im = Q * scale * cstln_amp;
 	  ++s;
 	}
-      make_lut_from_symbols(20);  // TBD
+      make_lut_from_symbols(mer);
     }
     result lut[R][R];
     void make_lut_from_symbols(float mer) {
