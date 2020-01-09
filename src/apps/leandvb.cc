@@ -68,10 +68,15 @@ struct config {
   enum dvb_version { DVB_S, DVB_S2 } standard;
   cstln_base::predef constellation;
   bool strongpls;      // For S2 APSK, expect PLS symbols at maximum amplitude
+  uint32_t modcods;    // Bitmask of desired S2 modcods
+  uint8_t framesizes;  // Bitmask of desired S2 frame sizes
   code_rate fec;
   float Ftune;         // Bias frequency for the QPSK demodulator (Hz)
   bool allow_drift;
+  float freq_tol;
+  float sr_tol;
   bool fastlock;
+  bool fastdrift;
   bool viterbi;
   bool hard_metric;
   int ldpc_bf;
@@ -120,10 +125,15 @@ struct config {
       standard(DVB_S),
       constellation(cstln_base::QPSK),
       strongpls(false),
+      modcods(0xffffffff),
+      framesizes(0x03),
       fec(FEC12),
       Ftune(0),
       allow_drift(false),
+      freq_tol(0.25),
+      sr_tol(100e-6),
       fastlock(false),
+      fastdrift(false),
       viterbi(false),
       hard_metric(false),
       ldpc_bf(0),
@@ -259,9 +269,11 @@ struct runtime_common {
 	  fprintf(stderr, "--inpipe: Standard input is not a pipe\n");
 	else
 	  perror("--inpipe");
-	if ( errno == EPERM )
+	if ( errno == EPERM ) {
 	  fprintf(stderr, "Try 'echo %d > /proc/sys/fs/pipe-max-size'\n",
 		  cfg.input_pipe);
+	  fprintf(stderr, "Increase /proc/sys/fs/pipe-user-pages-soft\n");
+	}
 	exit(1);
       }
     }
@@ -663,15 +675,21 @@ int run_dvbs2(config &cfg) {
 				      run.p_freq, run.p_ss, run.p_mer,
 				      run.p_cstln, run.p_cstln_pls,
 				      run.p_iqsymbols, run.p_framelock);
-  demod.omega = cfg.Fs/cfg.Fm;
+  demod.omega0 = cfg.Fs/cfg.Fm;
   if ( cfg.Ftune ) {
     if ( cfg.verbose )
       fprintf(stderr, "Biasing frame receiver to %.3f kHz\n", cfg.Ftune/1e3);
     demod.Ftune = cfg.Ftune / cfg.Fm;  // Per symbol
   }
-  demod.Fm = cfg.Fm;
+  demod.allow_drift = cfg.allow_drift;
+  demod.freq_tol = cfg.freq_tol;
+  demod.sr_tol = cfg.sr_tol;
   demod.meas_decimation = decimation(cfg.Fm, cfg.Finfo);
   demod.strongpls = cfg.strongpls;
+  demod.fastlock = cfg.fastlock;
+  demod.fastdrift = cfg.fastdrift;
+  demod.modcods = cfg.modcods;
+  demod.framesizes = cfg.framesizes;
 
   if ( cfg.fd_const ) {
     file_carrayprinter<f32> *symbol_printer;
@@ -1360,25 +1378,36 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      );
   fprintf
     (f,
-     "\nDVB-S/S2 options:\n"
+     "\nCommon DVB options:\n"
      "  --sr FLOAT        Symbol rate (Hz, default: 2e6)\n"
      "  --tune FLOAT      Bias frequency for demodulation (Hz)\n"
      "  --drift           Track frequency drift beyond safe limits\n"
      "  --standard S      DVB-S(default), DVB-S2\n"
-     "  --const STRING    DVB-S constellation: QPSK(default), BPSK\n"
-     "  --cr NUM/DEN      DVB-S code rate: 1/2(default) .. 7/8\n"
-     "  --strongpls       DVB-S2: Expect PLS symbols at max amplitude\n"
      "  --fastlock        Synchronize more aggressively (CPU-intensive)\n"
      "  --sampler         Symbol estimation: nearest, linear, rrc\n"
      "  --rrc-steps INT   RRC interpolation factor\n"
      "  --rrc-rej FLOAT   RRC filter rejection (defaut: 10)\n"
      "  --roll-off FLOAT  RRC roll-off (default: 0.35)\n"
-     "  --viterbi         DVB-S: Use Viterbi (CPU-intensive)\n"
+     );
+  fprintf
+    (f,
+     "\nDVB-S options:\n"
+     "  --const STRING    Constellation: QPSK(default), BPSK\n"
+     "  --cr NUM/DEN      Code rate: 1/2(default) .. 7/8\n"
+     "  --viterbi         Use Viterbi (CPU-intensive)\n"
      "  --hard-metric     Use Hamming distances with Viterbi\n"
+     );
+  fprintf
+    (f,
+     "\nDVB-S2 options:\n"
+     "  --strongpls       Expect PLS symbols at max amplitude\n"
+     "  --modcods INT     Bitmask of desired modcods\n"
+     "  --framesizes INT  Bitmask of desired sizes (1=normal,2=short)\n"
+     "  --fastdrift       Assume carrier drifts faster than pilots\n"
      "  --ldpc-bf INT     Max number of LDPC bitflips (default: 0)\n"
      "  --ldpc-helper CMD Spawn external LDPC decoder:\n"
      "                    'CMD --standard DVB-S2 --modcod N [--shortframes]'\n"
-     "  --nhelpers INT    Number of decoder processes (default:1)\n"
+     "  --nhelpers INT    Number of decoders per modcod/framesize\n"
      );
   fprintf
     (f,
@@ -1467,6 +1496,10 @@ int main(int argc, const char *argv[]) {
     }
     else if ( ! strcmp(argv[i], "--strongpls") )
       cfg.strongpls = true;
+    else if ( ! strcmp(argv[i], "--modcods") && i+1<argc )
+      cfg.modcods = strtol(argv[++i], NULL, 0);
+    else if ( ! strcmp(argv[i], "--framesizes") && i+1<argc )
+      cfg.framesizes = strtol(argv[++i], NULL, 0);
     else if ( ! strcmp(argv[i], "--cr") && i+1<argc ) {
       ++i;
       int f;
@@ -1480,6 +1513,8 @@ int main(int argc, const char *argv[]) {
     }
     else if ( ! strcmp(argv[i], "--fastlock") )
       cfg.fastlock = true;
+    else if ( ! strcmp(argv[i], "--fastdrift") )
+      cfg.fastdrift = true;
     else if ( ! strcmp(argv[i], "--viterbi") )
       cfg.viterbi = true;
     else if ( ! strcmp(argv[i], "--ldpc-bf") && i+1<argc )
@@ -1524,10 +1559,15 @@ int main(int argc, const char *argv[]) {
       cfg.anf = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--cnr") )
       cfg.cnr = true;
-    else if ( ! strcmp(argv[i], "--tune") && i+1<argc )
+    else if ( ! strcmp(argv[i], "--tune") && i+1<argc ) {
+      fprintf(stderr, "\n** --tune is broken, use --derotate instead.\n\n");
       cfg.Ftune = atof(argv[++i]);
-    else if ( ! strcmp(argv[i], "--drift") )
+    } else if ( ! strcmp(argv[i], "--drift") )
       cfg.allow_drift = true;
+    else if ( ! strcmp(argv[i], "--freq-tol") && i+1<argc )
+      cfg.freq_tol = atof(argv[++i]);
+    else if ( ! strcmp(argv[i], "--sr-tol") && i+1<argc )
+      cfg.sr_tol = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--hdlc") )
       cfg.hdlc = true;
     else if ( ! strcmp(argv[i], "--packetized") )
