@@ -32,11 +32,6 @@ namespace leansdr {
 #define DEBUG_CARRIER 0
 #define DEBUG_LOOKAHEAD 0
 
-  // S2 THRESHOLDS (for comparing demodulators)
-
-  static const int S2_MAX_ERR_SOF = 13;         // 26 bits
-  static const int S2_MAX_ERR_PLSCODE = 8;      // 64 bits, dmin=32
-
   // S2 SOF
   // EN 302 307-1 section 5.5.2.1 SOF field
 
@@ -427,11 +422,13 @@ namespace leansdr {
 	scrambling(0),
 	pls_total_errors(0), pls_total_count(0)
     {
+      float min_mer = -2.35;
       // Constellation for PLS
-      qpsk = new cstln_lut<SOFTSYMB,256>(cstln_base::QPSK);
-
-      // Clear the constellation cache.
-      for ( int i=0; i<32; ++i ) cstlns[i] = NULL;
+      bpsk = new cstln_lut<SOFTSYMB,256>(cstln_base::BPSK, min_mer);
+      // Constellation for dummy frames
+      qpsk = new cstln_lut<SOFTSYMB,256>(cstln_base::QPSK, min_mer);
+      // Constellations for MODCODS.
+      for ( int mc=0; mc<32; ++mc ) cstlns[mc] = NULL;
 
 #if TEST_DIVERSITY
       fprintf(stderr, "** DEBUG: Diversity test mode (slower)\n");
@@ -616,51 +613,51 @@ namespace leansdr {
 
       const int PLH_LENGTH = sof.LENGTH + plscodes.LENGTH;
       complex<float> plh_symbols[PLH_LENGTH];
+      llr_t plh_llrs[PLH_LENGTH];
       for ( int s=0; s<PLH_LENGTH; ++s ) {
 	complex<float> p = interp_next(&ss) * ss.gain;
 	plh_symbols[s] = p;
 	if ( psampled_pls ) *psampled_pls++ = p;
+	// Soft-decode as pi/2-BPSK.
+	typename cstln_lut<SOFTSYMB,256>::result *cr =
+	  (s&1) ? bpsk->lookup(p.im,-p.re) : bpsk->lookup(p.re,p.im);
+	plh_llrs[s] = cr->ss.bits[0];   // TBD Don't assume SOFTSYMB==llr_ss.
       }
 
       // Decode SOF.
 
-      uint32_t sof_bits = 0;
-      for ( int i=0; i<sof.LENGTH; ++i ) {
-	complex<float> p = plh_symbols[i];
-	float d = ( (i&1) ? p.im-p.re : p.im+p.re);
-	sof_bits = (sof_bits<<1) | (d<0);
-      }
-      int sof_errors = hamming_weight(sof_bits ^ sof.VALUE);
-      pls_total_errors += sof_errors;
-      pls_total_count += sof.LENGTH;
-      if ( sof_errors >= S2_MAX_ERR_SOF ) {
-	if ( sch->debug2 )
-	  fprintf(stderr, "Too many errors in SOF (%d/26)\n", sof_errors);
-	in.read(ss.p-in.rd());
-	enter_frame_detect();
-	return;
+      int llr_sof = 0;
+      {
+	static const uint32_t highbit = (uint32_t)1 << (sof.LENGTH-1);
+	for ( int i=0; i<sof.LENGTH; ++i ) {
+	  llr_t l = plh_llrs[i];
+	  if ( (sof.VALUE<<i) & highbit ) llr_sof -= l;  // Expected 1
+	  else                            llr_sof += l;  // Expected 0
+	}
       }
 
       // Decode PLSCODE.
 
-      uint64_t plscode = 0;
-      for ( int i=0; i<plscodes.LENGTH; ++i ) {
-	complex<float> p = plh_symbols[sof.LENGTH+i];
-	float d = ( (i&1) ? p.im-p.re : p.im+p.re);
-	plscode = (plscode<<1) | (d<0);
+      int plscode_index = 0;  // Avoid compiler warning
+      int llr_plscode = -128 * plscodes.LENGTH;  // TBD Don't assume llr_ss.
+      // Compute LLR for each candidate.
+      for ( int c=0; c<plscodes.COUNT; ++c ) {
+	uint64_t cw = plscodes.codewords[c];
+	int llr = 0;
+	static const uint64_t highbit = (uint64_t)1 << (plscodes.LENGTH-1);
+	for ( int i=0; i<plscodes.LENGTH; ++i ) {
+	  llr_t l = plh_llrs[sof.LENGTH+i];
+	  if ( (cw<<i) & highbit ) llr -= l;  // Expected 1
+	  else                     llr += l;  // Expected 0
+	}
+	if ( llr > llr_plscode ) { llr_plscode=llr; plscode_index=c; }
       }
-      int plscode_errors = plscodes.LENGTH + 1;
-      int plscode_index = -1;  // Avoid compiler warning.
-      // TBD: Optimiser
-      for ( int i=0; i<plscodes.COUNT; ++i ) {
-	int e = hamming_weight(plscode^plscodes.codewords[i]);
-	if ( e < plscode_errors ) { plscode_errors=e; plscode_index=i; }
-      }
-      pls_total_errors += plscode_errors;
-      pls_total_count += plscodes.LENGTH;
-      if ( plscode_errors >= S2_MAX_ERR_PLSCODE ) {
+
+      // Sanity-check on PLHEADER plausibility.
+      // Possibly useful to detect a bad lock or end of carrier.
+      if ( llr_sof+llr_plscode < 0 ) {
 	if ( sch->debug2 )
-	  fprintf(stderr, "Too many errors in plscode (%d)\n", plscode_errors);
+	  fprintf(stderr, "Weak PLHEADER (%d+%d)\n", llr_sof, llr_plscode);
 	in.read(ss.p-in.rd());
 	enter_frame_detect();
 	return;
@@ -686,10 +683,11 @@ namespace leansdr {
 
       // Use known PLH symbols to estimate carrier phase and amplitude.
 
-      float mer2 = match_ph_amp(plh_expected, plh_symbols, PLH_LENGTH, &ss);
-      float mer = 10*log10f(mer2);
+      float mer2_plh = match_ph_amp(plh_expected, plh_symbols, PLH_LENGTH, &ss);
+      float mer_plh_db = 10 * log10f(mer2_plh);
 #if DEBUG_CARRIER
-      fprintf(stderr, "CARRIER plheader: %s MER %.1f dB\n", ss.format(), mer);
+      fprintf(stderr, "CARRIER plheader: %s MER %.1f dB\n",
+	      ss.format(), mer_plh_db);
 #endif
 
       // Parse PLSCODE.
@@ -702,8 +700,9 @@ namespace leansdr {
       plslot<SOFTSYMB> *pout=out.wr(), *pout0=pout;
 
       if  ( sch->debug2 )
-	fprintf(stderr, "PLS: mc=%2d, sf=%d, pilots=%d (%2d/90) %4.1f dB ",
-		pls.modcod, pls.sf, pls.pilots, sof_errors+plscode_errors, mer);
+	fprintf(stderr, "PLS: mc=%2d, sf=%d, pilots=%d llr=%3d %4.1f dB ",
+		pls.modcod, pls.sf, pls.pilots,
+		llr_sof+llr_plscode, mer_plh_db);
 
       // Determine contents of frame.
 
@@ -721,13 +720,15 @@ namespace leansdr {
 	  enter_frame_detect();
 	  return;
 	}
-	if ( mer < mcinfo->esn0_nf - 1.0f ) {
-	  // False positive from PLHEADER detection.
+#if 0
+	if ( mer_plh_db < mcinfo->esn0_nf - 1.0f ) {
+	  // TBD Try to decode anyway, or drop frame, or unlock ?
 	  if ( sch->debug ) fprintf(stderr, "Insufficient MER\n");
 	  in.read(ss.p-in.rd());
 	  enter_frame_detect();
 	  return;
 	}
+#endif
 	if ( pls.sf && mcinfo->rate==FEC910 ) {  // TBD use fec_infos
 	  fprintf(stderr, "Unsupported or corrupted FEC\n");
 	  in.read(ss.p-in.rd());
@@ -751,10 +752,11 @@ namespace leansdr {
       static int plh_counter = 0;  // For debugging only
       fprintf(stderr, "\nLOOKAHEAD %d PLH sr %+3.0f  %s  %.1f dB\n",
 	      plh_counter, (1-ss.omega/omega0)*1e6,
-	      ss.format(), 10*log10f(mer2));
+	      ss.format(), 10*log10f(mer2_plh));
 #endif
       // Next SOF
       sampler_state ssnext;
+      float mer2_next;
       {
 	ssnext = ss;
 	int ns = ( S*PLSLOT_LENGTH +
@@ -767,10 +769,12 @@ namespace leansdr {
 	// Don't trust frequency from differential correlator.
 	// Our current estimate should be better.
 	ssnext.fw16 = ss.fw16;
-	float m2 = interp_match_sof(&ssnext);
+	mer2_next = interp_match_sof(&ssnext);
 #if DEBUG_CARRIER
 	fprintf(stderr, "\nCARRIER next: %.0f%%  %s  %.1f dB\n",
-		q*100, ssnext.format(), 10*log10f(m2));
+		q*100, ssnext.format(), 10*log10f(mer2_next));
+#else
+	(void)mer2_next;
 #endif
 	// Estimate symbol rate (considered stable over whole frame)
 	float dist = (ssnext.p-ss.p) + (ssnext.mu-ss.mu);
@@ -780,6 +784,8 @@ namespace leansdr {
       // Pilots
       int npilots = (S-1) / 16;
       sampler_state sspilots[npilots];
+      float mer2_pilots = 0;
+      int llr_pilots = 0;
       // Detect pilots
       if ( pls.pilots ) {
 	sampler_state ssp = ss;
@@ -787,6 +793,7 @@ namespace leansdr {
 	  ssp.skip_symbols(16*PLSLOT_LENGTH);
 	  float mer2 = interp_match_pilot(&ssp);
 	  sspilots[i] = ssp;
+	  mer2_pilots += mer2;
 #if DEBUG_LOOKAHEAD
 	  fprintf(stderr, "LOOKAHEAD %d PILOT%02d  sr %+3.0f  %s  %.1f dB\n",
 		  plh_counter, i, (1-ssp.omega/omega0)*1e6,
@@ -819,7 +826,7 @@ namespace leansdr {
 #if DEBUG_LOOKAHEAD
       fprintf(stderr, "LOOKAHEAD %d NEXTSOF  sr %+3.0f  %s  %.1f dB\n",
 	      plh_counter, (1-ssnext.omega/omega0)*1e6,
-	      ssnext.format(), 10*log10f(mer2));
+	      ssnext.format(), 10*log10f(mer2_pilots/npilots));
       ++plh_counter;
 #endif
 
@@ -900,9 +907,10 @@ namespace leansdr {
       }  // slot
 
       if ( sch->debug2 )
-	fprintf(stderr, "sr%+.0f fs=%.0f\n",
+	fprintf(stderr, "sr%+.0f fs=%.0f %4.1f dB\n",
 		(1-ss.omega/omega0)*1e6,
-		(freq_stats.max()-freq_stats.min())*1e6/65536.0f);
+		(freq_stats.max()-freq_stats.min())*1e6/65536.0f,
+		pls.pilots?10*log10f(mer2_pilots/npilots):-99);
 
       // Commit whole frame after final SOF.
       if ( ! pls.is_dummy() ) {
@@ -928,7 +936,7 @@ namespace leansdr {
       if ( meas_count >= meas_decimation ) {
 	opt_write(freq_out, ss_cache.fw16/65536/ss_cache.omega);
 	opt_write(ss_out, cstln_amp / ss_cache.gain);
-	opt_write(mer_out, mer2 ? 10*log10f(mer2) : -99);
+	opt_write(mer_out, mer2_plh ? 10*log10f(mer2_plh) : -99);
 	meas_count -= meas_decimation;
       }
 
@@ -951,6 +959,10 @@ namespace leansdr {
     // Adjust *ss accordingly.
     // Initialize AGC.
     // Return confidence (unbounded, 0=bad, 1=nominal).
+
+    // TBD: When the buffer contains multiple equally-good candidates
+    //      (this can happen with QPSK short frames or 8PSK or 16/32APSK),
+    //      select the earliest one, in order to maximize data recovery.
 
     float find_plheader(sampler_state *pss, int search_range) {
       complex<T> best_corr = 0;
@@ -1286,7 +1298,8 @@ namespace leansdr {
     }
 
   public:
-    cstln_lut<SOFTSYMB,256> *qpsk;
+    cstln_lut<SOFTSYMB,256> *bpsk;  // For PLHEADER
+    cstln_lut<SOFTSYMB,256> *qpsk;  // For dummy frames
     s2_plscodes<T> plscodes;
     cstln_lut<SOFTSYMB,256> *cstlns[32];  // Constellations in use, by modcod
     cstln_lut<SOFTSYMB,256> *get_cstln(int modcod) {
@@ -1295,6 +1308,9 @@ namespace leansdr {
 	if ( sch->debug )
 	  fprintf(stderr, "Creating LUT for %s ratecode %d\n",
 		  cstln_base::names[mcinfo->c], mcinfo->rate);
+	// Assume worst-case SNR for this MODCOD.
+	// TBD Can this be detrimental at high SNR ?
+	// TBD Needs a different value for short frames ?
 	cstlns[modcod] = new cstln_lut<SOFTSYMB,256>
 	  (mcinfo->c, mcinfo->esn0_nf, mcinfo->g1,mcinfo->g2,mcinfo->g3);
 #if 0
