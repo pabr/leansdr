@@ -653,6 +653,29 @@ namespace leansdr {
 	if ( llr > llr_plscode ) { llr_plscode=llr; plscode_index=c; }
       }
 
+#if DEBUG_CARRIER
+      // Perform ML decoding of PLHEADER to confirm LLR-based result.
+      {
+	int plscode_index2 = 0;
+	float best_m2 = -1;
+	complex<T> expected[PLH_LENGTH];
+	for ( int i=0; i<sof.LENGTH; ++i )
+	  expected[i] = sof.symbols[i];
+	for ( int c=0; c<plscodes.COUNT; ++c ) {
+	  for ( int i=0; i<plscodes.LENGTH; ++i )
+	    expected[sof.LENGTH+i] = plscodes.symbols[c][i];
+	  sampler_state ssc = ss;
+	  complex<T> symbs[PLH_LENGTH];  // Altered in-place
+	  memcpy(symbs, plh_symbols, sizeof(symbs));
+	  float m2 = match_ph_amp(expected, symbs, PLH_LENGTH, &ssc);
+	  if ( m2 > best_m2 ) { best_m2=m2; plscode_index2=c; }
+	}
+	fprintf(stderr, "CARRIER MLPLH %d %d %4.1f dB %s\n",
+		plscode_index, plscode_index2, 10*log10f(best_m2),
+		(plscode_index==plscode_index2)?"OK":"NOK");
+      }
+#endif
+
       // Sanity-check on PLHEADER plausibility.
       // Possibly useful to detect a bad lock or end of carrier.
       if ( llr_sof+llr_plscode < 0 ) {
