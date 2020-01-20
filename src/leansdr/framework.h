@@ -195,7 +195,7 @@ namespace leansdr {
       if ( min_write > buf.min_write ) buf.min_write = min_write;
     }
     // Return number of items writable at this->wr, 0 if full.
-    unsigned long writable() {
+    size_t writable() {
       if ( buf.end-buf.wr < buf.min_write ) buf.pack();
       return buf.end - buf.wr;
     }
@@ -236,7 +236,7 @@ namespace leansdr {
     pipebuf<T> &buf;
     int id;
     pipereader(pipebuf<T> &_buf) : buf(_buf), id(_buf.add_reader()) { }
-    unsigned long readable() { return buf.wr - buf.rds[id]; }
+    size_t readable() { return buf.wr - buf.rds[id]; }
     T *rd() { return buf.rds[id]; }
     void read(unsigned long n) {
       if ( buf.rds[id]+n > buf.wr ) {
