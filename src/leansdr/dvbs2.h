@@ -494,6 +494,7 @@ namespace leansdr {
 	if ( first_run ) {
 	  enter_frame_detect();
 	  first_run = false;
+	  continue;  // Must recheck writable().
 	}
 	switch ( state ) {
 	case FRAME_DETECT: run_frame_detect(); break;
@@ -937,6 +938,12 @@ namespace leansdr {
 		(freq_stats.max()-freq_stats.min())*1e6/65536.0f,
 		pls.pilots?10*log10f(mer2_pilots/npilots):-99);
 
+      if ( ss.fw16<min_freqw16 || ss.fw16>max_freqw16 ) {
+	if ( sch->debug ) fprintf(stderr, "Carrier out of bounds\n");
+	enter_frame_detect();
+	return;
+      }
+
       // Commit whole frame after final SOF.
       if ( ! pls.is_dummy() ) {
 	if ( (modcods&(1<<pls.modcod)) && (framesizes&(1<<pls.sf)) )
@@ -968,11 +975,6 @@ namespace leansdr {
       if ( state == FRAME_PROBE ) {
 	// First frame completed successfully.  Validate the lock.
 	enter_frame_locked();
-      }
-
-      if ( ss_cache.fw16<min_freqw16 || ss_cache.fw16>max_freqw16 ) {
-	if ( sch->debug ) fprintf(stderr, "Carrier out of bounds\n");
-	enter_frame_detect();
       }
     }
 
