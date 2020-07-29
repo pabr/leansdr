@@ -753,6 +753,7 @@ int run_dvbs2(config &cfg) {
 	    "Output:\n"
 	    "  '_': S2 frame received without errors\n"
 	    "  '.': error-corrected S2 frame\n"
+	    "  'C': TS packet with bad CRC\n"
 	    "  '!': S2 frame with remaining errors\n");
 
   run.sch->run();
