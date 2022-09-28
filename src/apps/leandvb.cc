@@ -1,4 +1,4 @@
-// This file is part of LeanSDR Copyright (C) 2016-2018 <pabr@pabr.org>.
+// This file is part of LeanSDR Copyright (C) 2016-2022 <pabr@pabr.org>.
 // See the toplevel README for more information.
 //
 // This program is free software: you can redistribute it and/or modify
@@ -33,6 +33,7 @@
 #include "leansdr/rs.h"
 #include "leansdr/gui.h"
 #include "leansdr/filtergen.h"
+#include "leansdr/network.h"
 
 #include "leansdr/hdlc.h"
 #include "leansdr/iess.h"
@@ -100,6 +101,7 @@ struct config {
   int fd_const;        // FD for constellation and symbols, or -1
   int fd_spectrum;     // FD for spectrum data, or -1
   bool json;           // Use JSON syntax
+  const char *udp_dst; // Output TS to this IP:PORT instead of stdout
 
   config()
     : verbose(false),
@@ -156,7 +158,8 @@ struct config {
       Finfo(5),
       fd_const(-1),
       fd_spectrum(-1),
-      json(false) {
+      json(false),
+      udp_dst(NULL) {
   }
 };
 
@@ -579,7 +582,10 @@ struct runtime_common {
     // Standard-specific code would go here,
     // outputting into p_tspackets and into the measurements channels.
 
-    new file_writer<tspacket>(sch, *p_tspackets, 1);
+    if ( cfg.udp_dst )
+      new udp_output<tspacket>(sch, *p_tspackets, cfg.udp_dst);
+    else
+      new file_writer<tspacket>(sch, *p_tspackets, 1);
 
     // BER ESTIMATION
 
@@ -1389,6 +1395,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --rrc-steps INT   RRC interpolation factor\n"
      "  --rrc-rej FLOAT   RRC filter rejection (defaut: 10)\n"
      "  --roll-off FLOAT  RRC roll-off (default: 0.35)\n"
+     "  --ts-udp IP:PORT  Send TS to UDP address\n"
      );
   fprintf
     (f,
@@ -1619,6 +1626,8 @@ int main(int argc, const char *argv[]) {
       cfg.fd_spectrum = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--json") )
       cfg.json = true;
+    else if ( ! strcmp(argv[i], "--ts-udp") && i+1<argc )
+      cfg.udp_dst = argv[++i];
     else
       usage(argv[0], stderr, 1, argv[i]);
   }
