@@ -583,7 +583,7 @@ struct runtime_common {
     // outputting into p_tspackets and into the measurements channels.
 
     if ( cfg.udp_dst )
-      new udp_output<tspacket>(sch, *p_tspackets, cfg.udp_dst);
+      new udp_output<tspacket>(sch, *p_tspackets, cfg.udp_dst, 7);
     else
       new file_writer<tspacket>(sch, *p_tspackets, 1);
 

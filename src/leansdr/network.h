@@ -32,9 +32,11 @@ namespace leansdr {
 
 template<typename T>
 struct udp_output : runnable {
-  udp_output(scheduler *sch, pipebuf<T> &_in, const char *udpaddr)
+  udp_output(scheduler *sch, pipebuf<T> &_in, const char *udpaddr,
+	     int _batch_size)
     : runnable(sch, _in.name),
-      in(_in)
+      in(_in),
+      batch_size(_batch_size)
   {
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if ( sock < 0 ) fatal("socket");
@@ -60,11 +62,11 @@ struct udp_output : runnable {
     if ( connect(sock,(sockaddr*)&addr,sizeof(addr)) < 0 ) fatal("connect");
   }
   void run() {
-    while ( in.readable() ) {
+    while ( in.readable() >= batch_size ) {
       // Return values for asynchronous protocols are not very useful.
       // Just ignore them.
-      (void)send(sock, in.rd(), sizeof(T), 0);
-      in.read(1);
+      (void)send(sock, in.rd(), sizeof(T)*batch_size, 0);
+      in.read(batch_size);
     }
   }
   ~udp_output() {
@@ -73,6 +75,7 @@ struct udp_output : runnable {
  private:
   pipereader<T> in;
   int sock;
+  int batch_size;
 };
 
 }  // namespace
