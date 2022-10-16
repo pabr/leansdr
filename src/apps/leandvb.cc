@@ -48,7 +48,7 @@ struct config {
   enum {
     INPUT_U8, INPUT_S8,
     INPUT_S12, INPUT_S16,
-    INPUT_F32
+    INPUT_F32, INPUT_F64
   } input_format;
   float float_scale;   // Scaling factor for float data.
   bool loop_input;
@@ -328,6 +328,17 @@ struct runtime_common {
       r_stdin->loop = cfg.loop_input;
       scaler<float,cf32,cf32> *r_scale =
 	new scaler<float,cf32,cf32>(sch, cfg.float_scale, *p_stdin, *p_rawiq);
+      amp = 2.0;
+      break;
+    }
+    case config::INPUT_F64: {
+      pipebuf<cf64> *p_stdin =
+	new pipebuf<cf64>(sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
+      file_reader<cf64> *r_stdin =
+	new file_reader<cf64>(sch, 0, *p_stdin);
+      r_stdin->loop = cfg.loop_input;
+      scaler<float,cf64,cf32> *r_scale =
+	new scaler<float,cf64,cf32>(sch, cfg.float_scale, *p_stdin, *p_rawiq);
       amp = 2.0;
       break;
     }
@@ -1368,6 +1379,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --s12          Input format is 12/16-bit signed (PlutoSDR, LimeSDR)\n"
      "  --s16          Input format is 16-bit signed\n"
      "  --f32          Input format is 32-bit float (gqrx)\n"
+     "  --f64          Input format is 64-bit float\n"
      "  -f HZ          Input sample rate (Hz, default: 2.4e6)\n"
      "  --loop         Repeat (stdin must be a file)\n"
      "  --inpipe INT   Resize stdin pipe (bytes)\n"
@@ -1598,6 +1610,8 @@ int main(int argc, const char *argv[]) {
       cfg.input_format = config::INPUT_S16;
     else if ( ! strcmp(argv[i], "--f32") )
       cfg.input_format = config::INPUT_F32;
+    else if ( ! strcmp(argv[i], "--f64") )
+      cfg.input_format = config::INPUT_F64;
     else if ( ! strcmp(argv[i], "--float-scale") && i+1<argc )
       cfg.float_scale = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--loop") )
