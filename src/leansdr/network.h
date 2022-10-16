@@ -50,14 +50,14 @@ struct udp_output : runnable {
     {
       const char *sep = strchr(udpaddr, ':');
       if ( ! sep ) fail("Expected IP:PORT");
+      int port = atoi(sep+1);
+      addr.sin_port = ntohs(port);
       char *ipaddr = strndup(udpaddr, sep-udpaddr);
+      if ( sch->verbose )
+	fprintf(stderr, "Sending UDP to %s:%d\n", ipaddr, port);
       int res = inet_aton(ipaddr, &addr.sin_addr);
       free(ipaddr);
       if ( ! res ) fatal("inet_aton");
-      int port = atoi(sep+1);
-      addr.sin_port = ntohs(port);
-      if ( sch->verbose )
-	fprintf(stderr, "Sending UDP to %s:%d\n", ipaddr, port);
     }
     if ( connect(sock,(sockaddr*)&addr,sizeof(addr)) < 0 ) fatal("connect");
   }
