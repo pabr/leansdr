@@ -872,7 +872,8 @@ namespace leansdr {
       ss_out = _ss_out ? new pipewriter<float>(*_ss_out) : NULL;
       mer_out = _mer_out ? new pipewriter<float>(*_mer_out) : NULL;
       cstln_out = _cstln_out ? new pipewriter<cf32>(*_cstln_out) : NULL;
-      memset(hist, 0, sizeof(hist));
+      for ( int i=0; i<sizeof(hist)/sizeof(hist[0]); ++i )
+	hist[i].p = hist[i].c = 0;
     }
     
     void set_omega(float _omega, float tol=10e-6) {
@@ -1111,7 +1112,8 @@ namespace leansdr {
       set_freq(0);
       freq_out = _freq_out ? new pipewriter<float>(*_freq_out) : NULL;
       cstln_out = _cstln_out ? new pipewriter< complex<T> >(*_cstln_out) : NULL;
-      memset(hist, 0, sizeof(hist));
+      for ( int i=0; i<sizeof(hist)/sizeof(hist[0]); ++i )
+	hist[i].p = hist[i].c = 0;
       init_lookup_tables();
     }
     
