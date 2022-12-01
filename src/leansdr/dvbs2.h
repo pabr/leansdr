@@ -940,6 +940,7 @@ namespace leansdr {
 
       if ( ss.fw16<min_freqw16 || ss.fw16>max_freqw16 ) {
 	if ( sch->debug ) fprintf(stderr, "Carrier out of bounds\n");
+	in.read(ss.p-in.rd());
 	enter_frame_detect();
 	return;
       }
