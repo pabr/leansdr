@@ -61,6 +61,8 @@ struct config {
   bool cnr;            // Measure CNR
   unsigned int decim;  // Decimation, 0=auto
   int fd_pp;           // FD for preprocessed data, or -1
+  int fd_bbf;          // FD for DVB-S2 bbframes, or -1
+  bool bbf_l3sync;     // Output l3sync headers to fd_bbf
   int fd_gse;          // FD for DVB-S2 Generic streams, or -1
   int fd_iqsymbols;    // FD for sampled symbols, or -1
   float awgn;          // Standard deviation of noise
@@ -120,7 +122,7 @@ struct config {
       cnr(false),
       decim(0),
       fd_pp(-1),
-      fd_gse(-1),
+      fd_bbf(-1), bbf_l3sync(false), fd_gse(-1),
       fd_iqsymbols(-1),
       awgn(0),
       Fm(2e6),
@@ -774,6 +776,8 @@ int run_dvbs2(config &cfg) {
   // Deframe BB frames to TS packets
   s2_deframer deframer(run.sch, p_bbframes, *run.p_tspackets,
 		       run.p_lock, run.p_locktime);
+  if ( cfg.fd_bbf >= 0 ) deframer.fd_bbf = cfg.fd_bbf;
+  deframer.bbf_l3sync = cfg.bbf_l3sync;
   if ( cfg.fd_gse >= 0 ) deframer.fd_gse = cfg.fd_gse;
 
   if ( cfg.debug )
@@ -1482,6 +1486,8 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
     (f, "\nTesting options:\n"
      "  --fd-pp FDNUM         Dump preprocessed IQ data to file descriptor\n"
      "  --fd-iqsymbols FDNUM  Dump sampled IQ symbols to file descriptor\n"
+     "  --fd-bbf FDNUM        Dump raw DVB-S2 bbframes to this FD\n"
+     "  --bbf-l3sync          Output 0xb8 headers (with --fd-bbf)\n"
      "  --fd-gse FDNUM        Dump DVB-S2 generic streams to this FD\n"
      "  --awgn FLOAT  Add white gaussian noise stddev (slow)\n"
      );
@@ -1642,6 +1648,10 @@ int main(int argc, const char *argv[]) {
       cfg.Fderot = atof(argv[++i]);
     else if ( ! strcmp(argv[i], "--fd-pp") && i+1<argc )
       cfg.fd_pp = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--fd-bbf") && i+1<argc )
+      cfg.fd_bbf = atoi(argv[++i]);
+    else if ( ! strcmp(argv[i], "--bbf-l3sync") )
+      cfg.bbf_l3sync = true;
     else if ( ! strcmp(argv[i], "--fd-gse") && i+1<argc )
       cfg.fd_gse = atoi(argv[++i]);
     else if ( ! strcmp(argv[i], "--awgn") && i+1<argc )

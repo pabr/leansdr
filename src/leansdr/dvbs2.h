@@ -2482,12 +2482,14 @@ namespace leansdr {
   // EN 302 307-1 section 5.1 Mode adaptation
 
   struct s2_deframer : runnable {
+    int fd_bbf;  // FD for raw BB frames, or -1
+    bool bbf_l3sync;  // Output 0xb8 headers to fd_bbf
     int fd_gse;  // FD for generic streams, or -1
     s2_deframer(scheduler *sch, pipebuf<bbframe> &_in, pipebuf<tspacket> &_out,
 		pipebuf<int> *_state_out=NULL,
 		pipebuf<unsigned long> *_locktime_out=NULL)
       : runnable(sch, "S2 deframer"),
-	fd_gse(-1),
+      fd_bbf(-1), bbf_l3sync(false), fd_gse(-1),
 	nleftover(-1),
 	in(_in), out(_out,MAX_TS_PER_BBFRAME),
 	current_state(false),
@@ -2551,6 +2553,17 @@ namespace leansdr {
 	nleftover = -1;
 	info_unlocked();
 	return;  // Max one state_out per loop
+      }
+      if ( fd_bbf >= 0 ) {
+	if ( bbf_l3sync ) {
+	  uint8_t l3sync = 0xb8;
+	  ssize_t nw = write(fd_bbf, &l3sync, 1);
+	  if ( nw != 1 ) fatal("write(l3sync)");
+	}
+	size_t n = 10 + dfl/8;
+	ssize_t nw = write(fd_bbf, bbh, n);
+	if ( nw < 0 ) fatal("write(bbf)");
+	if ( nw != n ) fail("partial write(bbf)");
       }
       if ( streamtype==3 && upl==188*8 && sync==0x47 && syncd<=dfl)
 	handle_ts(data, dfl, syncd, sync);
