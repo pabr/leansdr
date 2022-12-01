@@ -31,6 +31,7 @@ namespace leansdr {
   typedef complex<s8> cs8;
   typedef complex<u16> cu16;
   typedef complex<s16> cs16;
+  typedef complex<int32_t> cs32;
   typedef complex<f32> cf32;
   typedef complex<float> cf64;
 

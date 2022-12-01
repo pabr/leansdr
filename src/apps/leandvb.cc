@@ -47,7 +47,7 @@ struct config {
   bool highspeed;      // Demodulate raw u8 I/Q without preprocessing
   enum {
     INPUT_U8, INPUT_S8,
-    INPUT_S12, INPUT_S16,
+    INPUT_S12, INPUT_S16, INPUT_S32,
     INPUT_F32, INPUT_F64
   } input_format;
   float float_scale;   // Scaling factor for float data.
@@ -318,6 +318,17 @@ struct runtime_common {
       cconverter<s16,0, f32,0, 1,1> *r_convert =
 	new cconverter<s16,0, f32,0, 1,1>(sch, *p_stdin, *p_rawiq);
       amp = (cfg.input_format==config::INPUT_S12 ? 2048 : 32768);
+      break;
+    }
+    case config::INPUT_S32: {
+      pipebuf<cs32> *p_stdin =
+	new pipebuf<cs32>(sch, "stdin", BUF_BASEBAND+cfg.input_buffer);
+      file_reader<cs32> *r_stdin =
+	new file_reader<cs32>(sch, 0, *p_stdin);
+      r_stdin->loop = cfg.loop_input;
+      cconverter<int32_t,0, f32,0, 1,1> *r_convert =
+	new cconverter<int32_t,0, f32,0, 1,1>(sch, *p_stdin, *p_rawiq);
+      amp = 5000000;  // sdriq TBD
       break;
     }
     case config::INPUT_F32: {
@@ -1378,6 +1389,7 @@ void usage(const char *name, FILE *f, int c, const char *info=NULL) {
      "  --u8           Input format is 8-bit unsigned (rtl_sdr, default)\n"
      "  --s12          Input format is 12/16-bit signed (PlutoSDR, LimeSDR)\n"
      "  --s16          Input format is 16-bit signed\n"
+     "  --s32          Input format is 32-bit signed\n"
      "  --f32          Input format is 32-bit float (gqrx)\n"
      "  --f64          Input format is 64-bit float\n"
      "  -f HZ          Input sample rate (Hz, default: 2.4e6)\n"
@@ -1608,6 +1620,8 @@ int main(int argc, const char *argv[]) {
       cfg.input_format = config::INPUT_S12;
     else if ( ! strcmp(argv[i], "--s16") )
       cfg.input_format = config::INPUT_S16;
+    else if ( ! strcmp(argv[i], "--s32") )
+      cfg.input_format = config::INPUT_S32;
     else if ( ! strcmp(argv[i], "--f32") )
       cfg.input_format = config::INPUT_F32;
     else if ( ! strcmp(argv[i], "--f64") )
