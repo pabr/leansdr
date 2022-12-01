@@ -789,6 +789,8 @@ int run_dvbs2(config &cfg) {
   run.sch->shutdown();
   if ( cfg.debug ) run.sch->dump();
 
+  if ( cfg.gui && cfg.linger ) while ( 1 ) { run.sch->run(); usleep(10000); }
+
   return 0;
 }  // run_dvbs2
 #endif  // LEANSDR_EXTENSIONS
